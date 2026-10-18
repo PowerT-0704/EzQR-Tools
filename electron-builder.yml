@@ -1,0 +1,34 @@
+appId: W3F7.EzQRTools
+productName: EzQR-Tools
+directories:
+  output: release
+  buildResources: resources
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: resources
+    to: resources
+    filter:
+      - "**/*"
+asar: true
+compression: maximum
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/EzQR-Tools.ico
+  executableName: EzQR-Tools
+  artifactName: EzQR-Tools-${version}-${arch}-Setup.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 易码 EzQR-Tools
+  uninstallDisplayName: 易码 EzQR-Tools
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true

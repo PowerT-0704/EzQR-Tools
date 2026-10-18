@@ -1,0 +1,51 @@
+{
+  "name": "ezqr-tools",
+  "version": "7.0.0",
+  "description": "易码 EzQR-Tools - 轻盈、清晰的二维码解析与生成工具",
+  "main": "./out/main/index.js",
+  "author": "W3F7 <W3F7-1203019025@qq.com>",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "npm run build && playwright test",
+    "test:api": "node scripts/api-smoke.mjs",
+    "dist:win": "npm run build && electron-builder --win nsis --x64"
+  },
+  "dependencies": {
+    "@cruxgarden/plasma-ui": "0.8.0",
+    "fast-xml-parser": "5.11.2",
+    "fflate": "0.8.3",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@testing-library/dom": "10.4.1",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.3",
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@vitejs/plugin-react": "6.1.2",
+    "electron": "44.9.0",
+    "electron-builder": "26.15.3",
+    "electron-vite": "6.0.0",
+    "eslint": "9.39.5",
+    "jsdom": "27.0.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.48.1",
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
+  }
+}

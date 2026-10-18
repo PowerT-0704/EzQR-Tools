@@ -1,0 +1,13 @@
+node_modules/
+out/
+release/
+dist/
+coverage/
+test-results/
+playwright-report/
+config/
+data_dir.txt
+*.log
+*.tsbuildinfo
+.DS_Store
+

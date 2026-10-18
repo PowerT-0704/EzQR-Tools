@@ -1,0 +1,618 @@
+import { createServer, type Server } from 'node:http'
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import {
+  _electron as electron,
+  expect,
+  test,
+  type ElectronApplication,
+  type Locator,
+  type Page
+} from '@playwright/test'
+
+const projectRoot = path.resolve(import.meta.dirname, '..', '..')
+const fixtureImage = path.join(projectRoot, 'tests', 'fixtures', 'qr-sample.png')
+
+let server: Server
+let electronApp: ElectronApplication
+let page: Page
+let dataRoot: string
+let outputRoot: string
+let mockReleaseTag = 'v7.1.0'
+const rendererErrors: string[] = []
+
+async function startMockApi(): Promise<{ apiBaseUrl: string; updateApiUrl: string }> {
+  const png = await readFile(fixtureImage)
+  server = createServer((request, response) => {
+    if (request.url === '/github/latest-release') {
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      response.end(
+        JSON.stringify({
+          tag_name: mockReleaseTag,
+          html_url: `https://github.com/PowerT-0704/EzQR-Tools/releases/tag/${mockReleaseTag}`,
+          published_at: '2026-10-18T02:00:00Z',
+          draft: false,
+          prerelease: false
+        })
+      )
+      return
+    }
+    if (request.url?.startsWith('/v1/create-qr-code')) {
+      response.writeHead(200, { 'Content-Type': 'image/png' })
+      response.end(png)
+      return
+    }
+    if (request.method === 'POST' && request.url === '/v1/read-qr-code') {
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      response.end(
+        JSON.stringify({
+          code: 0,
+          message: 'ok',
+          data: { contents: ['https://example.com/plasma-e2e'] }
+        })
+      )
+      return
+    }
+    response.writeHead(404)
+    response.end()
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('模拟接口未能启动')
+  return {
+    apiBaseUrl: `http://127.0.0.1:${address.port}/v1`,
+    updateApiUrl: `http://127.0.0.1:${address.port}/github/latest-release`
+  }
+}
+
+async function overrideOpenDialog(targetPath: string): Promise<void> {
+  await electronApp.evaluate(
+    ({ dialog }, selectedPath) => {
+      dialog.showOpenDialog = (async () => ({
+        canceled: false,
+        filePaths: [selectedPath]
+      })) as typeof dialog.showOpenDialog
+    },
+    targetPath
+  )
+}
+
+async function overrideSaveDialog(targetPath: string): Promise<void> {
+  await electronApp.evaluate(
+    ({ dialog }, selectedPath) => {
+      dialog.showSaveDialog = (async () => ({
+        canceled: false,
+        filePath: selectedPath
+      })) as typeof dialog.showSaveDialog
+    },
+    targetPath
+  )
+}
+
+async function setRange(label: string, value: number): Promise<void> {
+  await page.getByRole('slider', { name: label }).evaluate((element, nextValue) => {
+    const input = element as HTMLInputElement
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value'
+    )?.set
+    setter?.call(input, String(nextValue))
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  }, value)
+}
+
+async function expectModalCloseHitbox(dialog: Locator): Promise<Locator> {
+  const closeButton = dialog.locator('.modal-close-button')
+  await expect(closeButton).toBeVisible()
+  const box = await closeButton.boundingBox()
+  expect(box).not.toBeNull()
+  if (!box) throw new Error('关闭按钮没有可测量的命中区域')
+  expect(box.width).toBeGreaterThanOrEqual(42)
+  expect(box.height).toBeGreaterThanOrEqual(42)
+
+  const points = [
+    { x: box.x + box.width / 2, y: box.y + box.height / 2 },
+    { x: box.x + 5, y: box.y + 5 },
+    { x: box.x + box.width - 5, y: box.y + 5 },
+    { x: box.x + 5, y: box.y + box.height - 5 },
+    { x: box.x + box.width - 5, y: box.y + box.height - 5 }
+  ]
+  for (const point of points) {
+    expect(
+      await page.evaluate(
+        ({ x, y }) =>
+          Boolean(document.elementFromPoint(x, y)?.closest('.modal-close-button')),
+        point
+      )
+    ).toBe(true)
+  }
+
+  await page.mouse.move(8, 8)
+  await page.waitForTimeout(260)
+  const closeVisual = closeButton.locator('.modal-close-visual')
+  const before = await closeVisual.evaluate(
+    (element) => getComputedStyle(element).backgroundColor
+  )
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.waitForTimeout(260)
+  const after = await closeVisual.evaluate(
+    (element) => getComputedStyle(element).backgroundColor
+  )
+  expect(after).not.toBe(before)
+  return closeButton
+}
+
+test.beforeAll(async () => {
+  dataRoot = await mkdtemp(path.join(os.tmpdir(), 'qrtool-e2e-'))
+  outputRoot = path.join(dataRoot, 'output')
+  await mkdir(path.join(dataRoot, 'config'), { recursive: true })
+  await mkdir(outputRoot, { recursive: true })
+  const mockApi = await startMockApi()
+  await writeFile(
+    path.join(dataRoot, 'config', 'config.json'),
+    JSON.stringify(
+      {
+        schemaVersion: 2,
+        api: { baseUrl: mockApi.apiBaseUrl, apiKey: '', timeoutSeconds: 10 },
+        qr: { size: 1024, errorCorrection: 'M', border: 2 },
+        historyLimit: 50,
+        appearance: {
+          palette: 'mistBlue',
+          backgroundImage: '',
+          material: {
+            backgroundBlur: 8,
+            refraction: 1.05,
+            dispersion: 0.55,
+            highlight: 0.8,
+            frost: 0.35,
+            elevation: 0.2,
+            viscosity: 0.5
+          }
+        },
+        output: { mode: 'custom', directory: outputRoot }
+      },
+      null,
+      2
+    ),
+    'utf8'
+  )
+
+  electronApp = await electron.launch({
+    args: ['.'],
+    cwd: projectRoot,
+    env: {
+      ...process.env,
+      QRTOOL_DATA_ROOT: dataRoot,
+      QRTOOL_USER_DATA_DIR: path.join(dataRoot, 'electron-userdata'),
+      QRTOOL_UPDATE_API_URL: mockApi.updateApiUrl
+    }
+  })
+  page = await electronApp.firstWindow()
+  page.on('pageerror', (error) => rendererErrors.push(error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      rendererErrors.push(message.text())
+      console.error('[renderer]', message.text())
+    }
+  })
+  await page.waitForSelector('.app-shell')
+})
+
+test.afterAll(async () => {
+  await electronApp?.close()
+  await new Promise<void>((resolve) => server?.close(() => resolve()))
+  await rm(dataRoot, { recursive: true, force: true })
+})
+
+test('renders the light two-workspace layout without fused surfaces', async () => {
+  await expect(page).toHaveTitle('易码 EzQR-Tools')
+  await expect(page.getByText('易码 EzQR-Tools')).toBeVisible()
+  const brandLogo = page.locator('.brand-logo')
+  await expect(brandLogo).toBeVisible()
+  expect(
+    await brandLogo.evaluate((element) => (element as HTMLImageElement).naturalWidth)
+  ).toBeGreaterThan(0)
+  expect(await brandLogo.evaluate((element) => getComputedStyle(element).width)).toBe('40px')
+  await expect(page.getByRole('tab', { name: '图片重构' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: '文本生成' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /历史记录/ })).toBeVisible()
+  await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(237, 244, 255)')
+
+  const navThumb = page.locator('.workspace-nav-thumb')
+  const initialTransform = await navThumb.evaluate((element) => getComputedStyle(element).transform)
+  await page.getByRole('tab', { name: '文本生成' }).click()
+  await page.waitForTimeout(300)
+  const nextTransform = await navThumb.evaluate((element) => getComputedStyle(element).transform)
+  expect(nextTransform).not.toBe(initialTransform)
+  await page.getByRole('tab', { name: '图片重构' }).click()
+
+  const canvas = page.locator('canvas.plasma-ground')
+  await expect(canvas).toBeVisible()
+  const canvasSize = await canvas.evaluate((element) => ({
+    width: (element as HTMLCanvasElement).width,
+    height: (element as HTMLCanvasElement).height
+  }))
+  expect(canvasSize.width).toBeGreaterThan(500)
+  expect(canvasSize.height).toBeGreaterThan(400)
+  expect(await page.locator('.plasma-panel').count()).toBeLessThanOrEqual(12)
+  const paddings = await page.evaluate(() => {
+    const paddingTop = (selector: string): number => {
+      const element = document.querySelector(selector)
+      return element ? Number.parseFloat(getComputedStyle(element).paddingTop) : 0
+    }
+    return {
+      task: paddingTop('.task-card'),
+      nav: paddingTop('.workspace-nav'),
+      preview: paddingTop('.preview-dock')
+    }
+  })
+  expect(paddings.task).toBeGreaterThanOrEqual(22)
+  expect(paddings.nav).toBeGreaterThanOrEqual(20)
+  expect(paddings.preview).toBeGreaterThanOrEqual(20)
+  const borders = await page.evaluate(() => {
+    const borderTop = (selector: string): number => {
+      const element = document.querySelector(selector)
+      return element ? Number.parseFloat(getComputedStyle(element).borderTopWidth) : -1
+    }
+    return {
+      nav: borderTop('.workspace-nav'),
+      task: borderTop('.task-card'),
+      preview: borderTop('.preview-dock'),
+      footer: borderTop('.footerbar'),
+      plasmaButton: borderTop('.titlebar .plasma-button'),
+      windowButton: borderTop('.titlebar .window-button')
+    }
+  })
+  Object.values(borders).forEach((border) => expect(border).toBe(0))
+
+  const titlebar = page.locator('.titlebar')
+  expect(await titlebar.evaluate((element) => getComputedStyle(element).borderTopWidth)).toBe('0px')
+  expect(await titlebar.evaluate((element) => getComputedStyle(element).boxShadow)).toBe('none')
+  const headerButton = page.getByRole('button', { name: '开发公告' })
+  expect(
+    await headerButton.evaluate((element) => getComputedStyle(element).borderTopWidth)
+  ).toBe('0px')
+  const restBackground = await headerButton.evaluate(
+    (element) => getComputedStyle(element).backgroundColor
+  )
+  await headerButton.hover()
+  await page.waitForTimeout(180)
+  const hoverBackground = await headerButton.evaluate(
+    (element) => getComputedStyle(element).backgroundColor
+  )
+  expect(hoverBackground).not.toBe(restBackground)
+  expect(
+    await headerButton.evaluate((element) => getComputedStyle(element).borderTopWidth)
+  ).toBe('0px')
+  await expect(page.getByRole('button', { name: '最小化' })).toHaveCSS('border-top-width', '0px')
+  await expect(page.getByRole('button', { name: '最小化' })).toHaveCSS('box-shadow', 'none')
+  expect(
+    await page.locator('.workspace-nav-thumb').evaluate(
+      (element) => getComputedStyle(element).backgroundImage
+    )
+  ).not.toBe('none')
+  expect(await page.locator('.app-shell').innerText()).not.toContain(
+    '二维码解析与生成工具'
+  )
+  expect(rendererErrors).toEqual([])
+  await page.screenshot({ path: 'test-results/qrtool-light-rebuild.png' })
+})
+
+test('shows GitHub release updates and handles the latest-version state', async () => {
+  const settingsButton = page.getByRole('button', { name: '软件设置' })
+  await expect(settingsButton.locator('.update-indicator')).toBeVisible()
+  await settingsButton.click()
+
+  const settingsDialog = page.getByRole('dialog', { name: '软件设置' })
+  await settingsDialog
+    .locator('.settings-nav')
+    .getByRole('tab', { name: /数据与关于/ })
+    .click()
+  await expect(settingsDialog.getByText('发现新版本 v7.1.0')).toBeVisible()
+  await expect(
+    settingsDialog.getByRole('button', { name: '查看 GitHub Release' })
+  ).toBeEnabled()
+  await expect(settingsDialog.getByText('最新版本 v7.1.0')).toBeVisible()
+  await page.waitForTimeout(320)
+  await page.screenshot({ path: 'test-results/qrtool-light-update.png' })
+
+  mockReleaseTag = 'v7.0.0'
+  await settingsDialog.getByRole('button', { name: '检查更新' }).click()
+  await expect(settingsDialog.getByText('已是最新版本', { exact: true })).toBeVisible()
+  await expect(settingsButton.locator('.update-indicator')).not.toBeVisible()
+  await settingsDialog.getByRole('button', { name: '完成' }).click()
+})
+
+test('settings restyle the root Plasma canvas and persist', async () => {
+  const settingsButton = page.getByRole('button', { name: '软件设置' })
+  await settingsButton.click()
+  await page.waitForTimeout(250)
+  const dialog = page.getByRole('dialog', { name: '软件设置' })
+  await expect(dialog).toBeVisible()
+  await expectModalCloseHitbox(dialog)
+  await expect(dialog).toHaveCSS('border-top-width', '0px')
+  await page.keyboard.press('Escape')
+  await expect(dialog).not.toBeVisible()
+  await expect(settingsButton).toBeFocused()
+
+  await settingsButton.click()
+  await expect(dialog).toBeVisible()
+  await expect(page.locator('.modal-root')).toHaveAttribute(
+    'data-modal-backdrop',
+    'palette'
+  )
+
+  await page.getByRole('button', { name: /樱花粉/ }).click()
+  await expect(page.locator('.plasma-appearance')).toHaveAttribute('data-palette', 'sakuraPink')
+  await page.screenshot({ path: 'test-results/qrtool-light-settings-appearance.png' })
+
+  const settingsThumb = page.locator('.settings-nav-thumb')
+  const firstThumbTransform = await settingsThumb.evaluate(
+    (element) => getComputedStyle(element).transform
+  )
+  await dialog.locator('.settings-nav').getByRole('tab', { name: /玻璃材质/ }).click()
+  await page.waitForTimeout(260)
+  const secondThumbTransform = await settingsThumb.evaluate(
+    (element) => getComputedStyle(element).transform
+  )
+  expect(secondThumbTransform).not.toBe(firstThumbTransform)
+  expect(
+    await settingsThumb.evaluate((element) => getComputedStyle(element).backgroundImage)
+  ).not.toBe('none')
+  await expect(page.getByText('实时材质预览')).toBeVisible()
+  const closeButton = dialog.locator('.modal-close-button')
+  await closeButton.focus()
+  await setRange('背景模糊', 20)
+  await expect(closeButton).toBeFocused()
+  await setRange('边缘折射', 1.55)
+  await expect(page.locator('.plasma-appearance')).toHaveAttribute('data-background-blur', '20')
+  await expect(page.locator('.plasma-appearance')).toHaveAttribute('data-refraction', '1.55')
+  await page.waitForTimeout(350)
+
+  const persisted = await page.evaluate(async () => {
+    const bootstrap = await window.qrTool.bootstrap()
+    return bootstrap.settings.appearance
+  })
+  expect(persisted.palette).toBe('sakuraPink')
+  expect(persisted.material.backgroundBlur).toBe(20)
+  expect(persisted.material.refraction).toBe(1.55)
+  await page.screenshot({ path: 'test-results/qrtool-light-settings.png' })
+
+  await page.getByRole('button', { name: '恢复材质默认值' }).click()
+  await dialog.locator('.settings-nav').getByRole('tab', { name: /接口与保存/ }).click()
+  expect(
+    await dialog.locator('.setting-panel').first().evaluate(
+      (element) => getComputedStyle(element).borderTopWidth
+    )
+  ).toBe('0px')
+  expect(
+    await dialog.getByRole('button', { name: '保存' }).evaluate(
+      (element) => getComputedStyle(element).borderTopWidth
+    )
+  ).toBe('0px')
+  expect(
+    await dialog.locator('.api-key-row input').evaluate(
+      (element) => getComputedStyle(element).borderTopWidth
+    )
+  ).not.toBe('0px')
+  await expect(
+    dialog.locator('.setting-segmented button.active')
+  ).toBeVisible()
+  await page.screenshot({ path: 'test-results/qrtool-light-settings-api.png' })
+  await dialog.locator('.settings-nav').getByRole('tab', { name: /数据与关于/ }).click()
+  await page.screenshot({ path: 'test-results/qrtool-light-settings-data.png' })
+  await dialog.locator('.settings-nav').getByRole('tab', { name: /外观与背景/ }).click()
+  await page.getByRole('button', { name: /晨雾蓝/ }).click()
+  await expect(page.locator('.plasma-appearance')).toHaveAttribute('data-palette', 'mistBlue')
+  await page.waitForTimeout(250)
+  await closeButton.click()
+  await expect(dialog).not.toBeVisible()
+})
+
+test('rebuilds an image and shows it in the persistent preview dock', async () => {
+  await overrideOpenDialog(fixtureImage)
+  await page.getByRole('button', { name: '选择二维码图片' }).click()
+  await expect(page.getByText('重构完成', { exact: false })).toBeVisible()
+  await expect(page.getByText('https://example.com/plasma-e2e')).toBeVisible()
+  await expect(page.getByAltText('二维码重构预览')).toBeVisible()
+  const rebuilt = path.join(outputRoot, 'qr-sample_rebuild.png')
+  expect((await stat(rebuilt)).isFile()).toBe(true)
+
+  await page.getByRole('button', { name: '原始图片' }).click()
+  await expect(page.getByAltText('二维码重构预览')).toBeVisible()
+  const previewThumb = page.locator('.preview-selector-thumb')
+  await expect(previewThumb).toBeVisible()
+  expect(
+    await previewThumb.evaluate((element) => getComputedStyle(element).backgroundImage)
+  ).not.toBe('none')
+  await page.screenshot({ path: 'test-results/qrtool-light-rebuild-complete.png' })
+})
+
+test('generates, saves, imports and reuses history from the modal', async () => {
+  await page.getByRole('tab', { name: '文本生成' }).click()
+  const textArea = page.locator('textarea.content-input')
+  expect(
+    await textArea.evaluate((element) => getComputedStyle(element).borderTopWidth)
+  ).not.toBe('0px')
+  await textArea.fill('浅色液态玻璃二维码生成测试')
+  await page.getByRole('button', { name: '生成二维码' }).click()
+  await expect(page.getByAltText('生成的二维码')).toBeVisible()
+  await expect(page.getByText('内容长度', { exact: false })).toBeVisible()
+
+  const savedFile = path.join(outputRoot, 'QRCode.png')
+  await overrideSaveDialog(savedFile)
+  await page.getByRole('button', { name: '下载二维码' }).click()
+  await expect(page.getByText('最近保存')).toBeVisible()
+  expect((await stat(savedFile)).isFile()).toBe(true)
+
+  const importedText = path.join(dataRoot, 'import.txt')
+  await writeFile(importedText, '从文本文件读取的新内容', 'utf8')
+  await overrideOpenDialog(importedText)
+  await page.getByRole('button', { name: '从文本文件读取' }).click()
+  await expect(textArea).toHaveValue('从文本文件读取的新内容')
+
+  await page.locator('.history-toggle').click()
+  const historyDialog = page.getByRole('dialog', { name: '历史记录' })
+  await expect(historyDialog).toBeVisible()
+  expect(
+    await page.locator('.history-toggle').evaluate(
+      (element) => getComputedStyle(element).backgroundImage
+    )
+  ).not.toBe('none')
+  await expect(page.locator('.preview-dock')).toBeVisible()
+  await page.waitForTimeout(300)
+  await expect(historyDialog.getByText('浅色液态玻璃二维码生成测试')).toBeVisible()
+  await page.screenshot({ path: 'test-results/qrtool-light-history.png' })
+  await expectModalCloseHitbox(historyDialog)
+
+  const generateItem = historyDialog
+    .locator('.history-dialog-item')
+    .filter({ hasText: '浅色液态玻璃二维码生成测试' })
+  await generateItem.getByRole('button', { name: '回填内容' }).click()
+  await expect(historyDialog).not.toBeVisible()
+  await expect(textArea).toHaveValue('浅色液态玻璃二维码生成测试')
+
+  await page.locator('.history-toggle').click()
+  const reopenedHistory = page.getByRole('dialog', { name: '历史记录' })
+  await reopenedHistory.getByRole('button', { name: '清空记录' }).click()
+  const confirmDialog = page.getByRole('dialog', { name: '清空历史记录' })
+  await confirmDialog.getByRole('button', { name: '清空' }).click()
+  await expect(confirmDialog).not.toBeVisible()
+  await page.locator('.history-toggle').click()
+  const emptyHistory = page.getByRole('dialog', { name: '历史记录' })
+  await expect(emptyHistory.getByText('还没有历史记录')).toBeVisible()
+  await emptyHistory.locator('.history-dialog-footer').getByRole('button', { name: '关闭' }).click()
+})
+
+test('opens Chinese settings and announcement overlays', async () => {
+  await page.getByRole('button', { name: '开发公告' }).click()
+  await expect(page.getByRole('dialog', { name: '开发公告' })).toBeVisible()
+  await page.waitForTimeout(300)
+  await expect(page.getByText('v7.0.0', { exact: false }).first()).toBeVisible()
+  const announcementDialog = page.getByRole('dialog', { name: '开发公告' })
+  const announcementClose = await expectModalCloseHitbox(announcementDialog)
+  await expect(
+    announcementDialog.getByRole('button', { name: '项目官网（即将上线）' })
+  ).toBeDisabled()
+  await expect(
+    announcementDialog.getByRole('button', { name: 'Plasma UI 项目' })
+  ).toBeEnabled()
+  await expect(
+    announcementDialog.getByRole('button', { name: 'GitHub 仓库' })
+  ).toBeEnabled()
+  await expect(
+    announcementDialog.getByRole('button', { name: '最新发布' })
+  ).toBeEnabled()
+  const insecureLinkError = await page.evaluate(async () => {
+    try {
+      await window.qrTool.openExternal('http://example.com')
+      return ''
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error)
+    }
+  })
+  expect(insecureLinkError).toContain('仅支持安全的 HTTPS 链接')
+  await page.screenshot({ path: 'test-results/qrtool-light-announcement.png' })
+  await announcementClose.click()
+
+  const bannedEnglish = [
+    'REBUILD WORKSPACE',
+    'TEXT ENCODER',
+    'LIVE PREVIEW',
+    'ACTIVITY ARCHIVE',
+    'PLASMA MATERIAL',
+    'RELEASE NOTES',
+    'NOTICE',
+    'API Key',
+    'API 状态',
+    'Tidal',
+    'Aurora',
+    'Ember',
+    'Plasma Liquid Workspace'
+  ]
+  const visibleText = await page.locator('.app-shell').innerText()
+  for (const phrase of bannedEnglish) {
+    expect(visibleText).not.toContain(phrase)
+  }
+})
+
+test('keeps a usable frame budget in light mode', async () => {
+  const samples = await page.evaluate(async () => {
+    const frameTimes: number[] = []
+    let previous = performance.now()
+    await new Promise<void>((resolve) => {
+      let frames = 0
+      const tick = (now: number): void => {
+        frameTimes.push(now - previous)
+        previous = now
+        frames += 1
+        if (frames >= 90) resolve()
+        else requestAnimationFrame(tick)
+      }
+      requestAnimationFrame(tick)
+    })
+    return frameTimes.slice(5)
+  })
+  samples.sort((left, right) => left - right)
+  const average = samples.reduce((sum, value) => sum + value, 0) / samples.length
+  const p95 = samples[Math.min(samples.length - 1, Math.floor(samples.length * 0.95))] ?? 0
+  expect(average).toBeLessThan(25)
+  expect(p95).toBeLessThan(34)
+})
+
+test('keeps clear spacing at large and minimum window sizes', async () => {
+  await page.getByRole('tab', { name: '图片重构' }).click()
+  await electronApp.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setSize(1720, 1000)
+  })
+  await page.waitForTimeout(450)
+  const gaps = await page.evaluate(() => {
+    const title = document.querySelector('.titlebar')?.getBoundingClientRect()
+    const layout = document.querySelector('.workspace-layout')?.getBoundingClientRect()
+    const nav = document.querySelector('.workspace-nav')?.getBoundingClientRect()
+    const task = document.querySelector('.task-area')?.getBoundingClientRect()
+    const preview = document.querySelector('.preview-area')?.getBoundingClientRect()
+    return {
+      header: title && layout ? layout.top - title.bottom : 0,
+      navTask: nav && task ? task.left - nav.right : 0,
+      taskPreview: task && preview ? preview.left - task.right : 0
+    }
+  })
+  expect(gaps.header).toBeGreaterThanOrEqual(15)
+  expect(gaps.navTask).toBeGreaterThanOrEqual(18)
+  expect(gaps.taskPreview).toBeGreaterThanOrEqual(18)
+  await page.screenshot({ path: 'test-results/qrtool-light-large.png' })
+
+  await electronApp.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setSize(980, 700)
+  })
+  await page.waitForTimeout(450)
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+  ).toBe(true)
+  await expect(page.getByRole('button', { name: '选择二维码图片' })).toBeVisible()
+  await page.screenshot({ path: 'test-results/qrtool-light-minimum.png' })
+
+  await page.getByRole('button', { name: '软件设置' }).click()
+  const settingsDialog = page.getByRole('dialog', { name: '软件设置' })
+  await settingsDialog.locator('.settings-nav').getByRole('tab', { name: /玻璃材质/ }).click()
+  await page.waitForTimeout(350)
+  expect(
+    await page.locator('.settings-pane').evaluate(
+      (element) => element.scrollWidth <= element.clientWidth
+    )
+  ).toBe(true)
+  await expect(settingsDialog.getByRole('button', { name: '完成' })).toBeVisible()
+  const modalPanelBox = await settingsDialog.boundingBox()
+  expect(modalPanelBox).not.toBeNull()
+  if (modalPanelBox) {
+    expect(modalPanelBox.y).toBeGreaterThanOrEqual(40)
+    expect(700 - (modalPanelBox.y + modalPanelBox.height)).toBeGreaterThanOrEqual(40)
+  }
+  await page.screenshot({ path: 'test-results/qrtool-light-settings-minimum.png' })
+  await settingsDialog.getByRole('button', { name: '完成' }).click()
+  expect(rendererErrors).toEqual([])
+})
+
