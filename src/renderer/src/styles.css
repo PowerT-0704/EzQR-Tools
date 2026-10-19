@@ -1254,10 +1254,24 @@ textarea:focus-visible {
 }
 
 .footer-api-text {
-  max-width: 46vw;
+  max-width: 24vw;
   overflow: hidden;
   color: var(--text-secondary);
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.footer-engine {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.footer-online-label {
+  flex: none;
   white-space: nowrap;
 }
 
@@ -1821,6 +1835,12 @@ textarea:focus-visible {
 }
 
 .material-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.qr-parameter-controls {
   display: flex;
   flex-direction: column;
   gap: 13px;

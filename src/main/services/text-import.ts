@@ -45,7 +45,7 @@ export interface TextExtractionResult {
 }
 
 function normalizeText(text: string): string {
-  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
+  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 }
 
 function decodeText(bytes: Uint8Array): string {
@@ -250,7 +250,7 @@ export async function extractText(filePath: string): Promise<TextExtractionResul
       else text = decodeText(bytes)
     }
     text = normalizeText(text)
-    if (!text) {
+    if (!text.trim()) {
       return { ok: false, text: '', message: '文件内容为空或无法提取文字', name }
     }
     return { ok: true, text, message: '', name }

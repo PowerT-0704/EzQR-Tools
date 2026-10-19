@@ -1,7 +1,10 @@
 import { Plasma } from '@cruxgarden/plasma-ui'
+import { UI_TEXT_LIMIT } from '../../../shared/constants'
+import type { QrSettings } from '../../../shared/types'
 import type { UiStatus } from '../types'
 
 interface GeneratePageProps {
+  qrEngine: QrSettings['engine']
   content: string
   busy: boolean
   status: UiStatus
@@ -14,6 +17,7 @@ interface GeneratePageProps {
 }
 
 export function GeneratePage({
+  qrEngine,
   content,
   busy,
   status,
@@ -33,9 +37,13 @@ export function GeneratePage({
           <div>
             <span className="section-kicker">内容输入</span>
             <h1>输入文本或链接</h1>
-            <p>支持多行文字、网址和从本地文档读取内容。</p>
+            <p>
+              {qrEngine === 'local'
+                ? '本地离线生成，支持多行文字、网址和本地文档。'
+                : '草料在线生成，输入内容会上传到草料接口。'}
+            </p>
           </div>
-          <span className={characterCount > 900 ? 'character-count warning' : 'character-count'}>
+          <span className="character-count">
             {characterCount} 字符
           </span>
         </header>
@@ -44,6 +52,7 @@ export function GeneratePage({
           className="content-input"
           value={content}
           spellCheck={false}
+          maxLength={UI_TEXT_LIMIT}
           placeholder={'在这里输入二维码内容，例如：\nhttps://example.com\n你好，这是一张二维码'}
           onChange={(event) => onContentChange(event.target.value)}
           onKeyDown={(event) => {
@@ -84,10 +93,9 @@ export function GeneratePage({
           <span className={`status-text ${status.kind}`}>{status.message}</span>
         </div>
 
-        {(fileMessage || characterCount > 900) && (
-          <p className={fileWarning || characterCount > 900 ? 'input-hint warning' : 'input-hint'}>
-            {fileMessage ||
-              '内容超过官方建议的 900 字符，仍可尝试生成，但服务器可能拒绝。'}
+        {fileMessage && (
+          <p className={fileWarning ? 'input-hint warning' : 'input-hint'}>
+            {fileMessage}
           </p>
         )}
       </Plasma>
@@ -105,8 +113,8 @@ export function GeneratePage({
         </div>
         <div>
           <span className="tip-number">03</span>
-          <strong>右侧预览</strong>
-          <p>生成结果会立即显示在右侧，并可下载为 PNG 图片。</p>
+          <strong>容量与预览</strong>
+          <p>容量受文本和纠错级别影响；生成后可在右侧预览并下载 PNG。</p>
         </div>
       </div>
     </div>

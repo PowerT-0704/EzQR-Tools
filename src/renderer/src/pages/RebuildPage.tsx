@@ -1,9 +1,10 @@
 import { Plasma } from '@cruxgarden/plasma-ui'
-import type { RebuildResult } from '../../../shared/types'
+import type { QrSettings, RebuildResult } from '../../../shared/types'
 import { truncateContent, truncateMiddle } from '../../../shared/format'
 import type { UiStatus } from '../types'
 
 interface RebuildPageProps {
+  qrEngine: QrSettings['engine']
   busy: boolean
   status: UiStatus
   result: RebuildResult | null
@@ -13,6 +14,7 @@ interface RebuildPageProps {
 }
 
 export function RebuildPage({
+  qrEngine,
   busy,
   status,
   result,
@@ -27,7 +29,11 @@ export function RebuildPage({
           <div>
             <span className="section-kicker">第一步</span>
             <h1>导入二维码图片</h1>
-            <p>拖入完整清晰的二维码，自动识别内容并生成高清版本。</p>
+            <p>
+              {qrEngine === 'local'
+                ? '图片上传草料在线解析，再由本地引擎生成高清二维码。'
+                : '图片上传草料在线解析，识别内容再上传草料生成二维码。'}
+            </p>
           </div>
           <span className={`status-pill ${status.kind}`}>{status.message}</span>
         </header>

@@ -1,6 +1,6 @@
 import { dirname, extname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { access } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import {
   app,
   BrowserWindow,
@@ -14,14 +14,13 @@ import {
   APP_AUTHOR_EMAIL,
   APP_NAME,
   APP_USER_MODEL_ID,
-  CONTENT_LIMIT_HINT,
-  FILL_LIMIT,
   IMAGE_EXTENSIONS,
   MEDIA_SCHEME,
   UI_TEXT_LIMIT
 } from '../shared/constants'
 import { IPC } from '../shared/channels'
 import type {
+  ApiConfig,
   ApiStatus,
   AppSettingsView,
   BootstrapData,
@@ -31,6 +30,7 @@ import type {
   HistoryRecord,
   MediaSelection,
   OperationProgress,
+  QrSettings,
   RebuildRequest,
   RebuildResult,
   SaveQrResult,
@@ -40,12 +40,15 @@ import type {
   WindowState
 } from '../shared/types'
 import { AnnouncementStore } from './services/announcement-store'
-import { CaoliaoApi } from './services/caoliao-api'
+import { CaoliaoQrEngine } from './services/caoliao-qr-engine'
 import { ConfigStore } from './services/config-store'
 import { AppError, messageFromError } from './services/errors'
 import { validateExternalUrl } from './services/external-links'
 import { HistoryStore } from './services/history-store'
 import { MediaStore } from './services/media-store'
+import { LocalQrEngine } from './services/local-qr-engine'
+import type { QrCodeEngine } from './services/qr-code-engine'
+import { validateQrSettings } from './services/qr-code-engine'
 import {
   buildRebuildPath,
   customOutputDirectory,
@@ -87,7 +90,7 @@ let lastGeneratedBytes: Buffer | null = null
 let lastGeneratedRecordId: string | null = null
 let lastGeneratedSavedPath: string | null = null
 let lastRebuiltPath: string | null = null
-let apiStatus: ApiStatus = { ok: null, message: '接口状态：检测中…', checkedAt: null }
+let apiStatus: ApiStatus = { ok: null, message: '草料解析：未检测', checkedAt: null }
 
 function resourcesDirectory(): string {
   return app.isPackaged
@@ -101,8 +104,8 @@ async function exists(filePath: string): Promise<boolean> {
     .catch(() => false)
 }
 
-function apiClient(): CaoliaoApi {
-  return new CaoliaoApi(configStore.get().api)
+function generationEngine(qr: QrSettings, api: ApiConfig): QrCodeEngine {
+  return qr.engine === 'local' ? new LocalQrEngine() : new CaoliaoQrEngine(api)
 }
 
 function rendererWindow(): BrowserWindow {
@@ -161,29 +164,53 @@ async function prepareImage(filePath: string): Promise<MediaSelection> {
 
 async function rebuild(request: RebuildRequest): Promise<RebuildResult> {
   if (busyRebuild) throw new AppError('BUSY', '已有二维码重构任务正在进行')
-  if (!request.operationId || !request.path) throw new AppError('INVALID_REQUEST', '请求参数不完整')
+  if (
+    !request ||
+    typeof request.operationId !== 'string' ||
+    !request.operationId.trim() ||
+    typeof request.path !== 'string' ||
+    !request.path
+  ) {
+    throw new AppError('INVALID_REQUEST', '请求参数不完整')
+  }
   busyRebuild = true
   try {
     sendProgress(request.operationId, 'rebuild', '准备上传图片…')
     const config = configStore.get()
-    const api = apiClient()
+    const qr = validateQrSettings(request.qr === undefined ? config.qr : request.qr)
+    const decoder: QrCodeEngine = new CaoliaoQrEngine(config.api)
+    const encoder = generationEngine(qr, config.api)
     const source = await prepareImage(request.path)
     sendProgress(request.operationId, 'rebuild', '正在上传并解析二维码…')
-    const contents = await api.decodeImage(source.path)
+    let sourceBytes: Buffer
+    try {
+      sourceBytes = await readFile(source.path)
+    } catch (error) {
+      throw new AppError('IMAGE_READ', `无法读取图片文件：${messageFromError(error)}`)
+    }
+    const contents = await decoder.decode({ bytes: sourceBytes, name: source.name })
     if (!contents.length) {
       throw new AppError('QR_NOT_FOUND', '未识别到二维码，请确认图片中包含完整清晰的二维码')
     }
-    sendProgress(request.operationId, 'rebuild', '解析成功，正在重新生成高清二维码…')
-    const bytes = await api.generateQr(contents[0] ?? '', config.qr)
+    const content = contents[0] ?? ''
+    if (content.length > UI_TEXT_LIMIT) {
+      throw new AppError('CONTENT_TOO_LONG', `内容超过 ${UI_TEXT_LIMIT} 字符上限，请缩短后重试`)
+    }
+    sendProgress(
+      request.operationId,
+      'rebuild',
+      qr.engine === 'local' ? '解析成功，正在本地生成高清二维码…' : '解析成功，正在通过草料生成高清二维码…'
+    )
+    const bytes = await encoder.encode(content, qr)
     const target = await buildRebuildPath(source.path, config)
     await savePng(target, bytes)
     lastRebuiltPath = target
-    await historyStore.add('rebuild', contents[0] ?? '', target)
+    await historyStore.add('rebuild', content, target)
     notifyHistory()
     sendProgress(request.operationId, 'rebuild', '重构完成')
     return {
       contents,
-      content: contents[0] ?? '',
+      content,
       sourcePath: source.path,
       savedPath: target,
       sourcePreviewUrl: source.previewUrl,
@@ -196,22 +223,38 @@ async function rebuild(request: RebuildRequest): Promise<RebuildResult> {
 
 async function generate(request: GenerateRequest): Promise<GenerateResult> {
   if (busyGenerate) throw new AppError('BUSY', '已有二维码生成任务正在进行')
-  if (!request.operationId) throw new AppError('INVALID_REQUEST', '请求参数不完整')
-  const content = String(request.content ?? '').trim()
-  if (!content) throw new AppError('EMPTY_CONTENT', '请先输入要生成二维码的内容')
+  if (
+    !request ||
+    typeof request.operationId !== 'string' ||
+    !request.operationId.trim() ||
+    typeof request.content !== 'string'
+  ) {
+    throw new AppError('INVALID_REQUEST', '请求参数不完整')
+  }
+  const content = request.content
+  if (!content.trim()) throw new AppError('EMPTY_CONTENT', '请先输入要生成二维码的内容')
+  if (content.length > UI_TEXT_LIMIT) {
+    throw new AppError('CONTENT_TOO_LONG', `内容超过 ${UI_TEXT_LIMIT} 字符上限，请缩短后重试`)
+  }
   busyGenerate = true
   try {
-    sendProgress(request.operationId, 'generate', '正在生成二维码…')
     const config = configStore.get()
-    const bytes = await apiClient().generateQr(content, config.qr)
+    const qr = validateQrSettings(request.qr === undefined ? config.qr : request.qr)
+    const engine = generationEngine(qr, config.api)
+    sendProgress(
+      request.operationId,
+      'generate',
+      qr.engine === 'local' ? '正在本地生成二维码…' : '正在通过草料生成二维码…'
+    )
+    const bytes = await engine.encode(content, qr)
+    const record = await historyStore.add('generate', content)
     lastGeneratedBytes = bytes
     lastGeneratedSavedPath = null
-    const record = await historyStore.add('generate', content)
     lastGeneratedRecordId = record.id
     notifyHistory()
     sendProgress(request.operationId, 'generate', '生成完成')
     return {
-      info: `内容长度 ${content.length} 字符 · 图片大小 ${(bytes.byteLength / 1024).toFixed(1)} KB`,
+      info: `${qr.engine === 'local' ? '本地生成' : '草料在线生成'} · 内容长度 ${content.length} 字符 · 图片大小 ${(bytes.byteLength / 1024).toFixed(1)} KB`,
       previewUrl: mediaStore.addBuffer(bytes),
       recordId: record.id
     }
@@ -294,26 +337,13 @@ async function importTextWithLimits(): Promise<TextImportResult | null> {
       message: `内容过长（${chars} 字符，超过界面 ${UI_TEXT_LIMIT} 字符上限），请精简后重试`
     }
   }
-  if (chars > FILL_LIMIT) {
-    return {
-      ok: false,
-      tooLong: true,
-      chars,
-      name: extracted.name,
-      text: '',
-      message: `已读取 ${extracted.name}（${chars} 字符），超过 ${FILL_LIMIT} 字符上限，已取消填入`
-    }
-  }
   return {
     ok: true,
     tooLong: false,
     chars,
     name: extracted.name,
     text: extracted.text,
-    message:
-      chars > CONTENT_LIMIT_HINT
-        ? `内容较长（官方建议不超过 ${CONTENT_LIMIT_HINT} 字符），可能生成失败`
-        : ''
+    message: ''
   }
 }
 
@@ -330,6 +360,7 @@ async function updateSettings(patch: SettingsPatch): Promise<AppSettingsView> {
       }
     }
     if (patch.qr) {
+      if (patch.qr.engine !== undefined) config.qr.engine = patch.qr.engine
       if (patch.qr.size !== undefined) config.qr.size = Number(patch.qr.size)
       if (patch.qr.errorCorrection !== undefined) {
         config.qr.errorCorrection = patch.qr.errorCorrection
@@ -407,7 +438,8 @@ function registerIpc(): void {
     if (busyApiCheck) return apiStatus
     busyApiCheck = true
     try {
-      apiStatus = await apiClient().checkConnection()
+      const engine: QrCodeEngine = new CaoliaoQrEngine(configStore.get().api)
+      apiStatus = await engine.health()
       return apiStatus
     } finally {
       busyApiCheck = false

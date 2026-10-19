@@ -31,6 +31,24 @@ describe('text import', () => {
     expect(result.text).toBe('第一行\n第二行')
   })
 
+  it('preserves leading and trailing whitespace when importing content', async () => {
+    const directory = await temporaryDirectory()
+    const file = path.join(directory, 'whitespace.txt')
+    await writeFile(file, '  原始文本\r\n保留空白  \n ', 'utf8')
+    const result = await extractText(file)
+    expect(result.ok).toBe(true)
+    expect(result.text).toBe('  原始文本\n保留空白  \n ')
+  })
+
+  it('rejects a whitespace-only document without treating it as QR content', async () => {
+    const directory = await temporaryDirectory()
+    const file = path.join(directory, 'empty.txt')
+    await writeFile(file, '  \r\n\t ', 'utf8')
+    const result = await extractText(file)
+    expect(result.ok).toBe(false)
+    expect(result.message).toContain('内容为空')
+  })
+
   it('extracts every docx run and paragraph', async () => {
     const directory = await temporaryDirectory()
     const file = path.join(directory, 'sample.docx')

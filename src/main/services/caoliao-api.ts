@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { readFile } from 'node:fs/promises'
-import type { ApiConfig, ApiStatus, QrSettings } from '../../shared/types'
+import type { ApiConfig, ApiStatus, QrOptions } from '../../shared/types'
 import { AppError } from './errors'
 
 interface DecodePayload {
@@ -36,7 +36,7 @@ export class CaoliaoApi {
 
   private headers(): Record<string, string> {
     const headers: Record<string, string> = {
-      'User-Agent': 'EzQR-Tools/7.0.0'
+      'User-Agent': 'EzQR-Tools/7.1.0'
     }
     if (this.config.apiKey) headers.Authorization = `Bearer ${this.config.apiKey}`
     return headers
@@ -68,11 +68,16 @@ export class CaoliaoApi {
       )
     }
 
+    return this.decodeBytes(bytes, path.basename(filePath))
+  }
+
+  async decodeBytes(bytes: Uint8Array, name: string): Promise<string[]> {
+    if (!bytes.byteLength) throw new AppError('IMAGE_READ', '图片文件为空，请选择其他图片')
     const form = new FormData()
     form.append(
       'file',
       new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }),
-      path.basename(filePath)
+      path.basename(name) || 'QRCode.png'
     )
 
     const response = await fetchWithTimeout(
@@ -99,19 +104,21 @@ export class CaoliaoApi {
       )
     }
     const contents = payload.data?.contents ?? []
+    if (!Array.isArray(contents)) {
+      throw new AppError('API_INVALID_RESPONSE', '服务器返回的二维码内容格式无效')
+    }
     return contents.map((item) => String(item))
   }
 
   async generateQr(
     content: string,
-    qr: QrSettings,
+    qr: QrOptions,
     timeoutMilliseconds = 30_000
   ): Promise<Buffer> {
-    const normalized = content.trim()
-    if (!normalized) throw new AppError('EMPTY_CONTENT', '二维码内容不能为空')
+    if (!content.trim()) throw new AppError('EMPTY_CONTENT', '二维码内容不能为空')
 
     const params = new URLSearchParams({
-      data: normalized,
+      data: content,
       format: 'png',
       error_correction: qr.errorCorrection,
       border: String(qr.border),

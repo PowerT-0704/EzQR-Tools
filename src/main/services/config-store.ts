@@ -6,6 +6,7 @@ import {
   DEFAULT_ERROR_CORRECTION,
   DEFAULT_HISTORY_LIMIT,
   DEFAULT_QR_BORDER,
+  DEFAULT_QR_ENGINE,
   DEFAULT_QR_SIZE,
   DEFAULT_TIMEOUT_SECONDS,
   MATERIAL_LIMITS
@@ -67,6 +68,7 @@ export function createDefaultConfig(): AppConfig {
       timeoutSeconds: DEFAULT_TIMEOUT_SECONDS
     },
     qr: {
+      engine: DEFAULT_QR_ENGINE,
       size: DEFAULT_QR_SIZE,
       errorCorrection: DEFAULT_ERROR_CORRECTION,
       border: DEFAULT_QR_BORDER
@@ -163,9 +165,10 @@ export function sanitizeConfig(raw: unknown): AppConfig {
       timeoutSeconds: clamp(api.timeoutSeconds, 5, 120, defaults.api.timeoutSeconds)
     },
     qr: {
-      size: clamp(qr.size, 128, 4096, defaults.qr.size),
+      engine: qr.engine === 'caoliao' ? 'caoliao' : DEFAULT_QR_ENGINE,
+      size: Math.round(clamp(qr.size, 128, 4096, defaults.qr.size)),
       errorCorrection,
-      border: clamp(qr.border, 0, 16, defaults.qr.border)
+      border: Math.round(clamp(qr.border, 0, 16, defaults.qr.border))
     },
     historyLimit: clamp(source.historyLimit, 1, 500, defaults.historyLimit),
     appearance: {

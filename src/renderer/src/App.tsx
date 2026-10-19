@@ -99,7 +99,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
   const [history, setHistory] = useState(boot.history)
   const [apiStatus, setApiStatus] = useState<ApiStatus>({
     ok: null,
-    message: '接口状态：检测中…',
+    message: '在线接口：未检测',
     checkedAt: null
   })
   const [apiBusy, setApiBusy] = useState(false)
@@ -133,7 +133,14 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
 
   const activeOperation = useRef('')
   const pendingPatch = useRef<SettingsPatch>({})
+  const queuedPatches = useRef<SettingsPatch[]>([])
+  const settingsWriteQueue = useRef<Promise<void>>(Promise.resolve())
   const settingsTimer = useRef<number | null>(null)
+
+  const receiveSettings = useCallback((next: AppSettingsView): void => {
+    const queued = queuedPatches.current.reduce(mergePatch, {})
+    setSettings(applyPatchLocally(next, mergePatch(queued, pendingPatch.current)))
+  }, [])
 
   const showToast = useCallback((message: string): void => {
     setToast(message)
@@ -148,7 +155,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
 
   const checkApi = useCallback(async (): Promise<void> => {
     setApiBusy(true)
-    setApiStatus((current) => ({ ...current, ok: null, message: '接口状态：检测中…' }))
+    setApiStatus((current) => ({ ...current, ok: null, message: '在线接口：检测中…' }))
     try {
       setApiStatus(await window.qrTool.checkApi())
     } catch (error) {
@@ -179,11 +186,6 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
   }, [boot.appVersion])
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void checkApi(), 450)
-    return () => window.clearTimeout(timer)
-  }, [checkApi])
-
-  useEffect(() => {
     const timer = window.setTimeout(() => void checkUpdates(), 900)
     return () => window.clearTimeout(timer)
   }, [checkUpdates])
@@ -192,12 +194,12 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
     void window.qrTool.getWindowState().then(setWindowState)
     const unsubscribers = [
       window.qrTool.onHistoryChanged(setHistory),
-      window.qrTool.onSettingsChanged(setSettings),
+      window.qrTool.onSettingsChanged(receiveSettings),
       window.qrTool.onWindowStateChanged(setWindowState),
       window.qrTool.onToast(showToast)
     ]
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe())
-  }, [showToast])
+  }, [receiveSettings, showToast])
 
   useEffect(() => {
     if (boot.warnings[0]) showToast(boot.warnings[0])
@@ -223,6 +225,26 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [alert, dialog])
 
+  const writeSettings = useCallback(
+    (patch: SettingsPatch): Promise<void> => {
+      queuedPatches.current.push(patch)
+      const write = settingsWriteQueue.current.then(async () => {
+        try {
+          const next = await window.qrTool.updateSettings(patch)
+          queuedPatches.current.shift()
+          receiveSettings(next)
+        } catch (error) {
+          queuedPatches.current.shift()
+          throw error
+        }
+      })
+      // A failed write must not prevent later user changes from being saved.
+      settingsWriteQueue.current = write.catch(() => undefined)
+      return write
+    },
+    [receiveSettings]
+  )
+
   const flushSettings = useCallback(async (): Promise<void> => {
     if (settingsTimer.current !== null) {
       window.clearTimeout(settingsTimer.current)
@@ -231,33 +253,35 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
     const patch = pendingPatch.current
     pendingPatch.current = {}
     if (!Object.keys(patch).length) return
-    try {
-      setSettings(await window.qrTool.updateSettings(patch))
-    } catch (error) {
-      showToast(`保存设置失败：${errorMessage(error)}`)
-    }
-  }, [showToast])
+    await writeSettings(patch)
+  }, [writeSettings])
 
   const scheduleSettingsPatch = useCallback(
     (patch: SettingsPatch): void => {
       setSettings((current) => applyPatchLocally(current, patch))
       pendingPatch.current = mergePatch(pendingPatch.current, patch)
       if (settingsTimer.current !== null) window.clearTimeout(settingsTimer.current)
-      settingsTimer.current = window.setTimeout(() => void flushSettings(), 200)
+      settingsTimer.current = window.setTimeout(() => {
+        void flushSettings().catch((error: unknown) => {
+          showToast(`保存设置失败：${errorMessage(error)}`)
+        })
+      }, 200)
     },
-    [flushSettings]
+    [flushSettings, showToast]
   )
 
   const updateSettingsNow = useCallback(
     async (patch: SettingsPatch): Promise<void> => {
+      setSettings((current) => applyPatchLocally(current, patch))
+      pendingPatch.current = mergePatch(pendingPatch.current, patch)
       try {
-        setSettings(await window.qrTool.updateSettings(patch))
+        await flushSettings()
       } catch (error) {
         showToast(`保存设置失败：${errorMessage(error)}`)
         throw error
       }
     },
-    [showToast]
+    [flushSettings, showToast]
   )
 
   const beginRebuild = useCallback(
@@ -274,7 +298,11 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
       setRebuildResult(null)
       setRebuildStatus({ kind: 'busy', message: '准备上传图片…' })
       try {
-        const result = await window.qrTool.rebuild({ operationId, path: selection.path })
+        const result = await window.qrTool.rebuild({
+          operationId,
+          path: selection.path,
+          qr: { ...settings.qr }
+        })
         setRebuildResult(result)
         const extra =
           result.contents.length > 1
@@ -289,7 +317,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
         activeOperation.current = ''
       }
     },
-    [showToast]
+    [settings.qr, showToast]
   )
 
   const chooseImage = useCallback(async (): Promise<void> => {
@@ -302,8 +330,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
   }, [beginRebuild])
 
   const beginGenerate = useCallback(async (): Promise<void> => {
-    const normalized = content.trim()
-    if (!normalized) {
+    if (!content.trim()) {
       setGenerateStatus({ kind: 'error', message: '请先输入要生成二维码的内容' })
       return
     }
@@ -312,7 +339,11 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
     setGenerateBusy(true)
     setGenerateStatus({ kind: 'busy', message: '正在生成二维码…' })
     try {
-      const result = await window.qrTool.generate({ operationId, content: normalized })
+      const result = await window.qrTool.generate({
+        operationId,
+        content,
+        qr: { ...settings.qr }
+      })
       setGenerateResult(result)
       setLastSavedPath('')
       setGenerateStatus({ kind: 'success', message: '生成成功，可下载保存' })
@@ -322,7 +353,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
       setGenerateBusy(false)
       activeOperation.current = ''
     }
-  }, [content])
+  }, [content, settings.qr])
 
   const saveGenerated = useCallback(async (): Promise<void> => {
     try {
@@ -477,6 +508,8 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
         <TitleBar
           maximized={windowState.maximized}
           apiOk={apiStatus.ok}
+          apiBusy={apiBusy}
+          qrEngine={settings.qr.engine}
           historyOpen={dialog === 'history'}
           historyCount={history.length}
           updateAvailable={updateInfo?.status === 'available'}
@@ -503,6 +536,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
           <section className="task-area" aria-live="polite">
             {workspace === 'rebuild' ? (
               <RebuildPage
+                qrEngine={settings.qr.engine}
                 busy={rebuildBusy}
                 status={rebuildStatus}
                 result={rebuildResult}
@@ -512,6 +546,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
               />
             ) : (
               <GeneratePage
+                qrEngine={settings.qr.engine}
                 content={content}
                 busy={generateBusy}
                 status={generateStatus}
@@ -543,6 +578,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
           authorEmail={boot.authorEmail}
           apiStatus={apiStatus}
           apiBusy={apiBusy}
+          qrEngine={settings.qr.engine}
           onRecheck={() => void checkApi()}
           onCopyEmail={() => void copyText(boot.authorEmail)}
         />
@@ -573,14 +609,14 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
             onChooseBackground={async () => {
               try {
                 const next = await window.qrTool.chooseBackgroundImage()
-                if (next) setSettings(next)
+                if (next) receiveSettings(next)
               } catch (error) {
                 showToast(errorMessage(error))
               }
             }}
             onClearBackground={async () => {
               try {
-                setSettings(await window.qrTool.clearBackgroundImage())
+                receiveSettings(await window.qrTool.clearBackgroundImage())
               } catch (error) {
                 showToast(errorMessage(error))
               }

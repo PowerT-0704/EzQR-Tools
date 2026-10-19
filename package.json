@@ -1,6 +1,6 @@
 {
   "name": "ezqr-tools",
-  "version": "7.0.0",
+  "version": "7.1.0",
   "description": "易码 EzQR-Tools - 轻盈、清晰的二维码解析与生成工具",
   "main": "./out/main/index.js",
   "author": "W3F7 <W3F7-1203019025@qq.com>",
@@ -26,6 +26,7 @@
     "@cruxgarden/plasma-ui": "0.8.0",
     "fast-xml-parser": "5.11.2",
     "fflate": "0.8.3",
+    "qrcode": "1.5.4",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
@@ -35,6 +36,8 @@
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.3",
     "@types/node": "24.10.1",
+    "@types/pngjs": "6.0.5",
+    "@types/qrcode": "1.5.6",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
     "@vitejs/plugin-react": "6.1.2",
@@ -43,6 +46,8 @@
     "electron-vite": "6.0.0",
     "eslint": "9.39.5",
     "jsdom": "27.0.1",
+    "jsqr": "1.4.0",
+    "pngjs": "7.0.0",
     "typescript": "5.9.3",
     "typescript-eslint": "8.48.1",
     "vite": "8.3.4",

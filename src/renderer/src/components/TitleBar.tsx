@@ -1,10 +1,12 @@
 import { Plasma } from '@cruxgarden/plasma-ui'
-import type { WindowState } from '../../../shared/types'
+import type { QrSettings, WindowState } from '../../../shared/types'
 import { GlassButton } from './GlassControls'
 
 interface TitleBarProps {
   maximized: boolean
   apiOk: boolean | null
+  apiBusy: boolean
+  qrEngine: QrSettings['engine']
   historyOpen: boolean
   historyCount: number
   updateAvailable: boolean
@@ -17,6 +19,8 @@ interface TitleBarProps {
 export function TitleBar({
   maximized,
   apiOk,
+  apiBusy,
+  qrEngine,
   historyOpen,
   historyCount,
   updateAvailable,
@@ -41,13 +45,17 @@ export function TitleBar({
           <span>轻盈液态玻璃二维码工作台</span>
         </div>
         <span
-          className={`header-status ${apiOk === true ? 'is-online' : apiOk === false ? 'is-offline' : 'is-checking'}`}
+          className={`header-status ${qrEngine === 'local' || apiOk === true ? 'is-online' : apiOk === false ? 'is-offline' : apiBusy ? 'is-checking' : ''}`}
           title={
-            apiOk === true
-              ? '接口已连接'
-              : apiOk === false
-                ? '接口暂时不可用'
-                : '接口检测中'
+            qrEngine === 'local'
+              ? '本地生成可离线使用；图片解析仍需联网'
+              : apiOk === true
+                ? '草料在线生成：接口已连接'
+                : apiOk === false
+                  ? '草料在线生成：接口暂时不可用'
+                  : apiBusy
+                    ? '草料在线生成：接口检测中'
+                    : '草料在线生成：接口未检测'
           }
         />
       </div>

@@ -55,7 +55,7 @@ const CATEGORIES: Array<{
 }> = [
   { id: 'appearance', label: '外观与背景', description: '浅色氛围和背景图片' },
   { id: 'material', label: '玻璃材质', description: '透明度、折射和光感' },
-  { id: 'api', label: '接口与保存', description: '接口密钥和保存位置' },
+  { id: 'api', label: '接口与保存', description: '生成引擎、参数与保存' },
   { id: 'data', label: '数据与关于', description: '数据目录和版本信息' }
 ]
 
@@ -108,6 +108,7 @@ function Segmented<T extends string>({
         <button
           key={item.value}
           type="button"
+          aria-pressed={value === item.value}
           className={value === item.value ? 'active' : ''}
           onClick={() => onChange(item.value)}
         >
@@ -398,16 +399,86 @@ export function SettingsDialog({
               <header className="settings-section-header">
                 <div>
                   <span className="section-kicker">连接与文件</span>
-                  <h3>接口密钥和保存位置</h3>
-                  <p>密钥只由主进程读取，不会回传到界面。</p>
+                  <h3>生成引擎、参数与保存</h3>
+                  <p>文本生成和图片重构后的重新生成，共用下方引擎与参数。</p>
                 </div>
               </header>
 
               <div className="setting-panel light-panel">
                 <div className="setting-row">
                   <div>
+                    <strong>生成引擎</strong>
+                    <p>
+                      {settings.qr.engine === 'local'
+                        ? '内容在本机编码，断网也可生成。'
+                        : '生成内容将上传草料接口，需要联网。'}
+                    </p>
+                  </div>
+                  <Segmented
+                    label="生成引擎"
+                    value={settings.qr.engine}
+                    items={[
+                      { value: 'local', label: '本地生成（离线）' },
+                      { value: 'caoliao', label: '草料在线' }
+                    ]}
+                    onChange={(engine) => onPatch({ qr: { engine } })}
+                  />
+                </div>
+                <p className="input-hint">
+                  图片解析仍使用草料在线服务：重构时会上传原始图片，需联网。
+                </p>
+              </div>
+
+              <div className="qr-parameter-controls">
+                <SliderField
+                  label="二维码尺寸"
+                  description="输出 PNG 的宽高像素。内容较多时需要更大尺寸。"
+                  value={settings.qr.size}
+                  min={128}
+                  max={4096}
+                  step={1}
+                  display={`${settings.qr.size} × ${settings.qr.size} px`}
+                  onChange={(size) => onPatch({ qr: { size } })}
+                />
+                <SliderField
+                  label="边框"
+                  description="二维码四周的空白模块数；建议保留至少 2 个模块。"
+                  value={settings.qr.border}
+                  min={0}
+                  max={16}
+                  step={1}
+                  display={`${settings.qr.border} 模块`}
+                  onChange={(border) => onPatch({ qr: { border } })}
+                />
+                <div className="setting-panel light-panel">
+                  <div className="setting-row">
+                    <div>
+                      <strong>纠错级别</strong>
+                      <p>纠错越高，可容纳的内容越少；容量不足时可手动改为 L。</p>
+                    </div>
+                    <Segmented
+                      label="纠错级别"
+                      value={settings.qr.errorCorrection}
+                      items={[
+                        { value: 'L', label: 'L' },
+                        { value: 'M', label: 'M' },
+                        { value: 'Q', label: 'Q' },
+                        { value: 'H', label: 'H' }
+                      ]}
+                      onChange={(errorCorrection) => onPatch({ qr: { errorCorrection } })}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="setting-panel light-panel">
+                <div className="setting-row">
+                  <div>
                     <strong>接口密钥</strong>
-                    <p>{settings.api.hasApiKey ? '已配置，可重新输入覆盖。' : '未配置，当前可免密钥使用。'}</p>
+                    <p>
+                      {settings.api.hasApiKey ? '已配置，可重新输入覆盖。' : '未配置，当前可免密钥使用。'}
+                      密钥只供在线接口使用，不会回传到界面。
+                    </p>
                   </div>
                   <span className={`config-state ${settings.api.hasApiKey ? 'on' : ''}`}>
                     {settings.api.hasApiKey ? '已配置' : '未配置'}

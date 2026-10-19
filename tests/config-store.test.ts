@@ -28,6 +28,7 @@ describe('ConfigStore', () => {
 
     expect(store.get().schemaVersion).toBe(2)
     expect(store.get().appearance.palette).toBe('mistBlue')
+    expect(store.get().qr.engine).toBe('local')
     expect(store.dataRoot).toBe(programDir)
     const saved = JSON.parse(
       await readFile(path.join(programDir, 'config', 'config.json'), 'utf8')
@@ -53,6 +54,7 @@ describe('ConfigStore', () => {
     expect(config.qr.size).toBe(4096)
     expect(config.qr.errorCorrection).toBe('M')
     expect(config.qr.border).toBe(0)
+    expect(config.qr.engine).toBe('local')
     expect(config.historyLimit).toBe(1)
     expect(config.appearance.palette).toBe('sakuraPink')
     expect(config.appearance.material.backgroundBlur).toBe(30)
@@ -112,6 +114,7 @@ describe('ConfigStore', () => {
     expect(store.get().appearance.backgroundImage).toBe('D:\\背景.png')
     expect(store.get().appearance.material.backgroundBlur).toBe(17)
     expect(store.get().output).toEqual({ mode: 'custom', directory: 'D:\\输出' })
+    expect(store.get().qr.engine).toBe('local')
 
     const saved = JSON.parse(
       await readFile(path.join(programDir, 'config', 'config.json'), 'utf8')
@@ -120,6 +123,34 @@ describe('ConfigStore', () => {
     expect(saved.appearance.palette).toBe('mintGreen')
     expect(saved.appearance).not.toHaveProperty('theme')
     expect(saved.appearance).not.toHaveProperty('mood')
+  })
+
+  it('defaults old v2 settings to local without rewriting their file', async () => {
+    const programDir = await temporaryDirectory('qrtool-v2-local-')
+    const userDataDir = await temporaryDirectory('qrtool-user-')
+    await mkdir(path.join(programDir, 'config'), { recursive: true })
+    const configPath = path.join(programDir, 'config', 'config.json')
+    const original = JSON.stringify({
+      schemaVersion: 2,
+      qr: { size: 768, errorCorrection: 'Q', border: 8 },
+      output: { mode: 'custom', directory: 'D:\\输出' }
+    })
+    await writeFile(configPath, original)
+    const store = await ConfigStore.create({ programDir, userDataDir })
+    expect(store.get().qr).toEqual({ engine: 'local', size: 768, errorCorrection: 'Q', border: 8 })
+    expect(await readFile(configPath, 'utf8')).toBe(original)
+  })
+
+  it('persists engine choice and normalizes fractional QR settings', async () => {
+    const programDir = await temporaryDirectory('qrtool-engine-')
+    const userDataDir = await temporaryDirectory('qrtool-user-')
+    const store = await ConfigStore.create({ programDir, userDataDir })
+    await store.update((config) => {
+      config.qr = { engine: 'caoliao', size: 512.8, errorCorrection: 'H', border: 3.2 }
+    })
+    const reloaded = await ConfigStore.create({ programDir, userDataDir })
+    expect(reloaded.get().qr).toEqual({ engine: 'caoliao', size: 513, errorCorrection: 'H', border: 3 })
+    expect(sanitizeConfig({ qr: { engine: 'unknown' } }).qr.engine).toBe('local')
   })
 
   it('writes and restores a data directory pointer', async () => {

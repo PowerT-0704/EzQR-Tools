@@ -2,6 +2,7 @@ export type WorkspaceId = 'rebuild' | 'generate'
 
 export type PaletteName = 'mistBlue' | 'sakuraPink' | 'mintGreen'
 export type ErrorCorrection = 'L' | 'M' | 'Q' | 'H'
+export type QrEngineId = 'local' | 'caoliao'
 export type OutputMode = 'source' | 'custom'
 export type StatusKind = 'idle' | 'busy' | 'success' | 'error'
 
@@ -26,10 +27,14 @@ export interface OutputSettings {
   directory: string
 }
 
-export interface QrSettings {
+export interface QrOptions {
   size: number
   errorCorrection: ErrorCorrection
   border: number
+}
+
+export interface QrSettings extends QrOptions {
+  engine: QrEngineId
 }
 
 export interface ApiConfig {
@@ -172,11 +177,13 @@ export interface BootstrapData {
 export interface RebuildRequest {
   operationId: string
   path: string
+  qr?: QrSettings
 }
 
 export interface GenerateRequest {
   operationId: string
   content: string
+  qr?: QrSettings
 }
 
 export interface AppErrorPayload {
