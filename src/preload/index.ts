@@ -24,7 +24,7 @@ function cleanInvokeError(error: unknown): Error {
   const raw = error instanceof Error ? error.message : String(error)
   const cleaned = raw
     .replace(/^Error invoking remote method '[^']+':\s*/i, '')
-    .replace(/^Error:\s*/i, '')
+    .replace(/^(?:AppError|Error):\s*/i, '')
   return new Error(cleaned || '操作失败')
 }
 

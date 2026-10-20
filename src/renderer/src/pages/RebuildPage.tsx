@@ -9,6 +9,7 @@ interface RebuildPageProps {
   status: UiStatus
   result: RebuildResult | null
   onChoose: () => void
+  onRetry?: () => void
   onOpenImage: (path: string) => void
   onCopy: (text: string) => void
 }
@@ -19,6 +20,7 @@ export function RebuildPage({
   status,
   result,
   onChoose,
+  onRetry,
   onOpenImage,
   onCopy
 }: RebuildPageProps): React.JSX.Element {
@@ -31,7 +33,7 @@ export function RebuildPage({
             <h1>导入二维码图片</h1>
             <p>
               {qrEngine === 'local'
-                ? '图片上传草料在线解析，再由本地引擎生成高清二维码。'
+                ? '图片在本机解析并生成高清二维码，断网可用，无需 API Key。'
                 : '图片上传草料在线解析，识别内容再上传草料生成二维码。'}
             </p>
           </div>
@@ -53,6 +55,9 @@ export function RebuildPage({
           <button type="button" className="primary-button" disabled={busy} onClick={onChoose}>
             {busy ? '正在处理…' : '选择二维码图片'}
           </button>
+          {onRetry && !busy && (
+            <button type="button" className="secondary-button" onClick={onRetry}>重试此图片</button>
+          )}
         </div>
       </Plasma>
 

@@ -36,7 +36,7 @@ export class CaoliaoApi {
 
   private headers(): Record<string, string> {
     const headers: Record<string, string> = {
-      'User-Agent': 'EzQR-Tools/7.1.0'
+      'User-Agent': 'EzQR-Tools/7.2.0'
     }
     if (this.config.apiKey) headers.Authorization = `Bearer ${this.config.apiKey}`
     return headers

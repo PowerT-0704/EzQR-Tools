@@ -15,6 +15,7 @@ import {
   APP_NAME,
   APP_USER_MODEL_ID,
   IMAGE_EXTENSIONS,
+  MAX_QR_SOURCE_BYTES,
   MEDIA_SCHEME,
   UI_TEXT_LIMIT
 } from '../shared/constants'
@@ -47,6 +48,7 @@ import { validateExternalUrl } from './services/external-links'
 import { HistoryStore } from './services/history-store'
 import { MediaStore } from './services/media-store'
 import { LocalQrEngine } from './services/local-qr-engine'
+import { validateQrSource } from './services/image-input'
 import type { QrCodeEngine } from './services/qr-code-engine'
 import { validateQrSettings } from './services/qr-code-engine'
 import {
@@ -104,7 +106,7 @@ async function exists(filePath: string): Promise<boolean> {
     .catch(() => false)
 }
 
-function generationEngine(qr: QrSettings, api: ApiConfig): QrCodeEngine {
+function processingEngine(qr: QrSettings, api: ApiConfig): QrCodeEngine {
   return qr.engine === 'local' ? new LocalQrEngine() : new CaoliaoQrEngine(api)
 }
 
@@ -147,7 +149,7 @@ function windowState(): WindowState {
   return { maximized: Boolean(mainWindow?.isMaximized()) }
 }
 
-async function prepareImage(filePath: string): Promise<MediaSelection> {
+async function prepareImage(filePath: string, qrSource = true): Promise<MediaSelection> {
   const resolved = resolve(filePath)
   if (!IMAGE_EXTENSIONS.includes(extname(resolved).toLowerCase() as (typeof IMAGE_EXTENSIONS)[number])) {
     throw new AppError('IMAGE_TYPE', '不支持的图片格式，请选择 PNG / JPG / BMP / GIF / WebP')
@@ -155,6 +157,7 @@ async function prepareImage(filePath: string): Promise<MediaSelection> {
   if (!(await exists(resolved))) {
     throw new AppError('IMAGE_MISSING', '文件不存在或已被移动')
   }
+  if (qrSource) await validateQrSource(resolved)
   return {
     path: resolved,
     previewUrl: mediaStore.addFile(resolved),
@@ -175,20 +178,27 @@ async function rebuild(request: RebuildRequest): Promise<RebuildResult> {
   }
   busyRebuild = true
   try {
-    sendProgress(request.operationId, 'rebuild', '准备上传图片…')
+    sendProgress(request.operationId, 'rebuild', '准备解析图片…')
     const config = configStore.get()
     const qr = validateQrSettings(request.qr === undefined ? config.qr : request.qr)
-    const decoder: QrCodeEngine = new CaoliaoQrEngine(config.api)
-    const encoder = generationEngine(qr, config.api)
+    const engine = processingEngine(qr, config.api)
     const source = await prepareImage(request.path)
-    sendProgress(request.operationId, 'rebuild', '正在上传并解析二维码…')
-    let sourceBytes: Buffer
-    try {
-      sourceBytes = await readFile(source.path)
-    } catch (error) {
-      throw new AppError('IMAGE_READ', `无法读取图片文件：${messageFromError(error)}`)
+    sendProgress(request.operationId, 'rebuild', qr.engine === 'local' ? '正在本地解析二维码…' : '正在上传并解析二维码…')
+    let sourceBytes: Uint8Array
+    if (qr.engine === 'local') {
+      if (!request.normalizedPng) throw new AppError('INVALID_IMAGE', '缺少本地解析所需的 PNG 数据，请重新选择图片')
+      sourceBytes = request.normalizedPng
+    } else {
+      try {
+        sourceBytes = await readFile(source.path)
+      } catch (error) {
+        throw new AppError('IMAGE_READ', `无法读取图片文件：${messageFromError(error)}`)
+      }
+      if (sourceBytes.byteLength > MAX_QR_SOURCE_BYTES) {
+        throw new AppError('IMAGE_TOO_LARGE', '二维码源图片最多 32 MiB，请裁剪或缩小后重试')
+      }
     }
-    const contents = await decoder.decode({ bytes: sourceBytes, name: source.name })
+    const contents = await engine.decode({ bytes: sourceBytes, name: source.name })
     if (!contents.length) {
       throw new AppError('QR_NOT_FOUND', '未识别到二维码，请确认图片中包含完整清晰的二维码')
     }
@@ -201,9 +211,14 @@ async function rebuild(request: RebuildRequest): Promise<RebuildResult> {
       'rebuild',
       qr.engine === 'local' ? '解析成功，正在本地生成高清二维码…' : '解析成功，正在通过草料生成高清二维码…'
     )
-    const bytes = await encoder.encode(content, qr)
-    const target = await buildRebuildPath(source.path, config)
-    await savePng(target, bytes)
+    const bytes = await engine.encode(content, qr)
+    let target: string
+    try {
+      target = await buildRebuildPath(source.path, config)
+      await savePng(target, bytes)
+    } catch (error) {
+      throw new AppError('SAVE_FAILED', `二维码已解析，但保存失败，请检查保存位置后重试：${messageFromError(error)}`)
+    }
     lastRebuiltPath = target
     await historyStore.add('rebuild', content, target)
     notifyHistory()
@@ -240,7 +255,7 @@ async function generate(request: GenerateRequest): Promise<GenerateResult> {
   try {
     const config = configStore.get()
     const qr = validateQrSettings(request.qr === undefined ? config.qr : request.qr)
-    const engine = generationEngine(qr, config.api)
+    const engine = processingEngine(qr, config.api)
     sendProgress(
       request.operationId,
       'generate',
@@ -469,7 +484,7 @@ function registerIpc(): void {
       ]
     })
     if (result.canceled || !result.filePaths[0]) return null
-    const selected = await prepareImage(result.filePaths[0])
+    const selected = await prepareImage(result.filePaths[0], false)
     return updateSettings({ appearance: { backgroundImage: selected.path } })
   })
 

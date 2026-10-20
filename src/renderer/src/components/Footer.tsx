@@ -42,7 +42,7 @@ export function Footer({
       <div className="footer-api">
         <span className="footer-engine">
           <span className={`status-dot ${qrEngine === 'local' ? 'ok' : ''}`} />
-          {qrEngine === 'local' ? '本地生成 · 可离线' : '草料在线生成'}
+          {qrEngine === 'local' ? '本地处理 · 可离线' : '草料在线处理'}
         </span>
         <span className="footer-online-label">在线接口</span>
         <span

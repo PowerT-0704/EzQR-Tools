@@ -2,9 +2,9 @@ import { readFile } from 'node:fs/promises'
 
 const FALLBACK_ANNOUNCEMENT = `# 开发公告
 
-**当前版本：v7.1.0**
+**当前版本：v7.2.0**
 
-易码 EzQR-Tools 是来自 CDUT 的二维码解析与生成工具。文本默认本地生成，图片解析仍需联网。
+易码 EzQR-Tools 是来自 CDUT 的二维码解析与生成工具。默认本地解析与生成，断网可完成图片重构，无需 API Key。
 `
 
 export class AnnouncementStore {

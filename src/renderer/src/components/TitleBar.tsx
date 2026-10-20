@@ -48,14 +48,14 @@ export function TitleBar({
           className={`header-status ${qrEngine === 'local' || apiOk === true ? 'is-online' : apiOk === false ? 'is-offline' : apiBusy ? 'is-checking' : ''}`}
           title={
             qrEngine === 'local'
-              ? '本地生成可离线使用；图片解析仍需联网'
+              ? '本地解析与生成均可离线使用，无需 API Key'
               : apiOk === true
-                ? '草料在线生成：接口已连接'
+                ? '草料在线处理：接口已连接'
                 : apiOk === false
-                  ? '草料在线生成：接口暂时不可用'
+                  ? '草料在线处理：接口暂时不可用'
                   : apiBusy
-                    ? '草料在线生成：接口检测中'
-                    : '草料在线生成：接口未检测'
+                    ? '草料在线处理：接口检测中'
+                    : '草料在线处理：接口未检测'
           }
         />
       </div>

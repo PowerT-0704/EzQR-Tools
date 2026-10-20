@@ -2,6 +2,7 @@ import QRCode from 'qrcode'
 import type { QrOptions } from '../../shared/types'
 import { DEFAULT_ERROR_CORRECTION, DEFAULT_QR_BORDER, DEFAULT_QR_SIZE } from '../../shared/constants'
 import { AppError } from './errors'
+import { LocalDecodeEngine } from './local-decode-engine'
 import type { EngineHealth, ImageBytes, QrCodeEngine } from './qr-code-engine'
 import { validateQrOptions } from './qr-code-engine'
 
@@ -14,7 +15,7 @@ function capacityError(): AppError {
 
 export class LocalQrEngine implements QrCodeEngine {
   readonly id = 'local' as const
-  readonly supportsDecode = false
+  readonly supportsDecode = true
 
   async encode(content: string, options: QrOptions): Promise<Buffer> {
     if (typeof content !== 'string' || !content.trim()) {
@@ -53,8 +54,8 @@ export class LocalQrEngine implements QrCodeEngine {
     }
   }
 
-  async decode(_image: ImageBytes): Promise<string[]> {
-    throw new AppError('DECODE_UNSUPPORTED', '当前版本的本地引擎仅支持生成，图片解析仍需草料在线接口')
+  async decode(image: ImageBytes): Promise<string[]> {
+    return new LocalDecodeEngine().decode(image)
   }
 
   async health(): Promise<EngineHealth> {

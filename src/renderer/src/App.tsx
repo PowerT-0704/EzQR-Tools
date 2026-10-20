@@ -21,7 +21,7 @@ import { PreviewDock } from './components/PreviewDock'
 import { TitleBar } from './components/TitleBar'
 import { WorkspaceNav } from './components/WorkspaceNav'
 import { paletteStyle } from './lib/appearance'
-import { createOperationId, errorMessage, imageLoads } from './lib/image'
+import { createOperationId, errorMessage, normalizeQrImage } from './lib/image'
 import { AnnouncementDialog } from './overlays/AnnouncementDialog'
 import { AlertDialog, type AlertState } from './overlays/AlertDialog'
 import { SettingsDialog } from './overlays/SettingsDialog'
@@ -114,6 +114,8 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
   const [dragging, setDragging] = useState(false)
 
   const [rebuildBusy, setRebuildBusy] = useState(false)
+  const rebuildInFlight = useRef(false)
+  const [rebuildSelection, setRebuildSelection] = useState<MediaSelection | null>(null)
   const [rebuildStatus, setRebuildStatus] = useState<UiStatus>({
     kind: 'idle',
     message: '等待选择图片…'
@@ -286,22 +288,23 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
 
   const beginRebuild = useCallback(
     async (selection: MediaSelection): Promise<void> => {
+      if (rebuildInFlight.current) return
+      rebuildInFlight.current = true
+      const qr = { ...settings.qr }
       setWorkspace('rebuild')
-      const valid = await imageLoads(selection.previewUrl)
-      if (!valid) {
-        setRebuildStatus({ kind: 'error', message: '图片无法读取，请换一张图片重试' })
-        return
-      }
+      setRebuildSelection(selection)
       const operationId = createOperationId('rebuild')
       activeOperation.current = operationId
       setRebuildBusy(true)
       setRebuildResult(null)
-      setRebuildStatus({ kind: 'busy', message: '准备上传图片…' })
+      setRebuildStatus({ kind: 'busy', message: '正在读取并转换图片…' })
       try {
+        const normalizedPng = await normalizeQrImage(selection.previewUrl)
         const result = await window.qrTool.rebuild({
           operationId,
           path: selection.path,
-          qr: { ...settings.qr }
+          qr,
+          normalizedPng: qr.engine === 'local' ? normalizedPng : undefined
         })
         setRebuildResult(result)
         const extra =
@@ -313,6 +316,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
       } catch (error) {
         setRebuildStatus({ kind: 'error', message: errorMessage(error) })
       } finally {
+        rebuildInFlight.current = false
         setRebuildBusy(false)
         activeOperation.current = ''
       }
@@ -321,6 +325,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
   )
 
   const chooseImage = useCallback(async (): Promise<void> => {
+    if (rebuildInFlight.current) return
     try {
       const selection = await window.qrTool.chooseImage()
       if (selection) await beginRebuild(selection)
@@ -413,6 +418,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
       event.preventDefault()
       dragDepth.current = 0
       setDragging(false)
+      if (rebuildInFlight.current) return
       const file = event.dataTransfer.files[0]
       if (!file) return
       try {
@@ -540,6 +546,8 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
                 busy={rebuildBusy}
                 status={rebuildStatus}
                 result={rebuildResult}
+                onRetry={rebuildSelection && rebuildStatus.kind === 'error'
+                  ? () => void beginRebuild(rebuildSelection) : undefined}
                 onChoose={() => void chooseImage()}
                 onOpenImage={(path) => void window.qrTool.openPath(path)}
                 onCopy={(text) => void copyText(text)}

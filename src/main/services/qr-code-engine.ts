@@ -58,7 +58,7 @@ export function validateQrSettings(raw: unknown): QrSettings {
   const options = validateQrOptions(raw)
   const engine = (raw as Record<string, unknown>).engine
   if (engine !== 'local' && engine !== 'caoliao') {
-    throw new AppError('INVALID_QR_OPTIONS', '请选择本地生成或草料在线生成引擎')
+    throw new AppError('INVALID_QR_OPTIONS', '请选择本地处理或草料在线处理引擎')
   }
   return { ...options, engine }
 }

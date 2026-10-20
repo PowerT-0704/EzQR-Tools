@@ -1,6 +1,6 @@
 {
   "name": "ezqr-tools",
-  "version": "7.1.0",
+  "version": "7.2.0",
   "description": "易码 EzQR-Tools - 轻盈、清晰的二维码解析与生成工具",
   "main": "./out/main/index.js",
   "author": "W3F7 <W3F7-1203019025@qq.com>",
@@ -28,7 +28,8 @@
     "fflate": "0.8.3",
     "qrcode": "1.5.4",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "zxing-wasm": "3.1.6"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",

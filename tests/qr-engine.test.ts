@@ -160,13 +160,13 @@ describe('LocalQrEngine', () => {
     ).rejects.toMatchObject({ code: 'QR_SIZE_TOO_SMALL' })
   })
 
-  it('rejects empty input and makes unsupported local decode explicit', async () => {
+  it('rejects empty input and delegates local decode validation', async () => {
     const engine = new LocalQrEngine()
     expect(engine.id).toBe('local')
-    expect(engine.supportsDecode).toBe(false)
+    expect(engine.supportsDecode).toBe(true)
     await expect(engine.encode('  \n ', defaults)).rejects.toMatchObject({ code: 'EMPTY_CONTENT' })
     await expect(engine.decode({ bytes: new Uint8Array(), name: 'sample.png' })).rejects.toMatchObject({
-      code: 'DECODE_UNSUPPORTED'
+      code: 'INVALID_IMAGE'
     })
     await expect(engine.health()).resolves.toMatchObject({ ok: true })
   })

@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http'
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, stat, truncate, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import QRCode from 'qrcode'
@@ -17,13 +17,15 @@ import {
 
 const projectRoot = path.resolve(import.meta.dirname, '..', '..')
 const fixtureImage = path.join(projectRoot, 'tests', 'fixtures', 'qr-sample.png')
+const decodeFixtures = path.join(projectRoot, 'tests', 'fixtures', 'decode')
+const decodeContent = '  易码本地解析 🧪\nhttps://example.com/offline\n  '
 
 let server: Server
 let electronApp: ElectronApplication
 let page: Page
 let dataRoot: string
 let outputRoot: string
-let mockReleaseTag = 'v7.2.0'
+let mockReleaseTag = 'v7.3.0'
 const rendererErrors: string[] = []
 const qrRequests: string[] = []
 
@@ -60,8 +62,8 @@ async function openQrSettings(): Promise<Locator> {
 
 async function configureQr(qr: QrSettings): Promise<void> {
   const dialog = await openQrSettings()
-  await dialog.getByRole('group', { name: '生成引擎', exact: true }).getByRole('button', {
-    name: qr.engine === 'local' ? '本地生成（离线）' : '草料在线',
+  await dialog.getByRole('group', { name: '处理引擎', exact: true }).getByRole('button', {
+    name: qr.engine === 'local' ? '本地处理（离线）' : '草料在线',
     exact: true
   }).click()
   await setRange('二维码尺寸', qr.size)
@@ -288,7 +290,7 @@ test.beforeAll(async () => {
     }
   })
   await page.waitForSelector('.app-shell')
-  expect(await page.evaluate(async () => (await window.qrTool.bootstrap()).appVersion)).toBe('7.1.0')
+  expect(await page.evaluate(async () => (await window.qrTool.bootstrap()).appVersion)).toBe('7.2.0')
 })
 
 test.afterAll(async () => {
@@ -402,15 +404,15 @@ test('shows GitHub release updates and handles the latest-version state', async 
     .locator('.settings-nav')
     .getByRole('tab', { name: /数据与关于/ })
     .click()
-  await expect(settingsDialog.getByText('发现新版本 v7.2.0')).toBeVisible()
+  await expect(settingsDialog.getByText('发现新版本 v7.3.0')).toBeVisible()
   await expect(
     settingsDialog.getByRole('button', { name: '查看 GitHub Release' })
   ).toBeEnabled()
-  await expect(settingsDialog.getByText('最新版本 v7.2.0')).toBeVisible()
+  await expect(settingsDialog.getByText('最新版本 v7.3.0')).toBeVisible()
   await page.waitForTimeout(320)
   await page.screenshot({ path: 'test-results/qrtool-light-update.png' })
 
-  mockReleaseTag = 'v7.1.0'
+  mockReleaseTag = 'v7.2.0'
   await settingsDialog.getByRole('button', { name: '检查更新' }).click()
   await expect(settingsDialog.getByText('已是最新版本', { exact: true })).toBeVisible()
   await expect(settingsButton.locator('.update-indicator')).not.toBeVisible()
@@ -508,12 +510,12 @@ test('rebuilds an image and shows it in the persistent preview dock', async () =
   await overrideOpenDialog(fixtureImage)
   await page.getByRole('button', { name: '选择二维码图片' }).click()
   await expect(page.getByText('重构完成', { exact: false })).toBeVisible()
-  await expect(page.getByText('https://example.com/plasma-e2e')).toBeVisible()
+  await expect(page.getByText('wxp://f2f0lXAbpx9HDakSYhgZCO71HrkRlP7riDo7Qaf4ph0Bx2g')).toBeVisible()
   await expect(page.getByAltText('二维码重构预览')).toBeVisible()
   const rebuilt = path.join(outputRoot, 'qr-sample_rebuild.png')
   expect((await stat(rebuilt)).isFile()).toBe(true)
-  await decodeSavedPng(rebuilt, 'https://example.com/plasma-e2e')
-  expect(qrRequests.slice(previousRequests)).toEqual(['/v1/read-qr-code'])
+  await decodeSavedPng(rebuilt, 'wxp://f2f0lXAbpx9HDakSYhgZCO71HrkRlP7riDo7Qaf4ph0Bx2g')
+  expect(qrRequests.slice(previousRequests)).toEqual([])
 
   await page.getByRole('button', { name: '原始图片' }).click()
   await expect(page.getByAltText('二维码重构预览')).toBeVisible()
@@ -588,7 +590,7 @@ test('opens Chinese settings and announcement overlays', async () => {
   await page.getByRole('button', { name: '开发公告' }).click()
   await expect(page.getByRole('dialog', { name: '开发公告' })).toBeVisible()
   await page.waitForTimeout(300)
-  await expect(page.getByText('v7.1.0', { exact: false }).first()).toBeVisible()
+  await expect(page.getByText('v7.2.0', { exact: false }).first()).toBeVisible()
   const announcementDialog = page.getByRole('dialog', { name: '开发公告' })
   const announcementClose = await expectModalCloseHitbox(announcementDialog)
   await expect(
@@ -763,7 +765,7 @@ test('persists QR parameters and applies all correction levels and border limits
   })
   await dialog.locator('.settings-pane').evaluate((element) => element.scrollTo(0, 0))
   await expect(dialog.locator('.settings-nav').getByRole('tab', { name: /接口与保存/ })).toHaveAttribute('aria-selected', 'true')
-  await expect(dialog.getByRole('group', { name: '生成引擎', exact: true })).toBeVisible()
+  await expect(dialog.getByRole('group', { name: '处理引擎', exact: true })).toBeVisible()
   await page.waitForTimeout(650)
   await page.screenshot({ path: 'test-results/qrtool-local-settings.png' })
   await electronApp.evaluate(({ BrowserWindow }) => {
@@ -827,7 +829,7 @@ test('uses the online adapter only after an explicit switch and keeps immediate 
     const storedEngine = await page.evaluate(async () => {
       const dialog = document.querySelector('[role="dialog"]')
       const localButton = Array.from(dialog?.querySelectorAll('button') ?? []).find(
-        (button) => button.textContent?.trim() === '本地生成（离线）'
+        (button) => button.textContent?.trim() === '本地处理（离线）'
       )
       localButton?.click()
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
@@ -889,19 +891,19 @@ test('keeps a new local selection when an older online settings write and event 
   await setMainNetworkBlocked(true)
   try {
     const dialog = await openQrSettings()
-    const engines = dialog.getByRole('group', { name: '生成引擎', exact: true })
+    const engines = dialog.getByRole('group', { name: '处理引擎', exact: true })
     await engines.getByRole('button', { name: '草料在线', exact: true }).click()
     await expect.poll(() => electronApp.evaluate(() =>
       (globalThis as typeof globalThis & { qrE2eSettingsWriteStarted?: boolean }).qrE2eSettingsWriteStarted
     )).toBe(true)
-    const localButton = engines.getByRole('button', { name: '本地生成（离线）', exact: true })
+    const localButton = engines.getByRole('button', { name: '本地处理（离线）', exact: true })
     await localButton.click()
     await expect(localButton).toHaveAttribute('aria-pressed', 'true')
     await page.evaluate(() => {
       const state = window as typeof window & { qrE2eSelectionLost?: boolean; qrE2eObserver?: MutationObserver }
-      const group = document.querySelector('[role="group"][aria-label="生成引擎"]')
+      const group = document.querySelector('[role="group"][aria-label="处理引擎"]')
       const button = Array.from(group?.querySelectorAll('button') ?? []).find(
-        (item) => item.textContent?.trim() === '本地生成（离线）'
+        (item) => item.textContent?.trim() === '本地处理（离线）'
       )
       if (!button) throw new Error('本地引擎选项不可用')
       state.qrE2eSelectionLost = false
@@ -944,3 +946,185 @@ test('keeps a new local selection when an older online settings write and event 
   }
 })
 
+
+async function chooseAndRebuild(source: string, expectedContent: string): Promise<string> {
+  await page.getByRole('tab', { name: '图片重构' }).click()
+  const previousId = (await page.evaluate(() => window.qrTool.getHistory()))[0]?.id
+  await overrideOpenDialog(source)
+  await page.getByRole('button', { name: '选择二维码图片', exact: true }).click()
+  await expect.poll(async () => (await page.evaluate(() => window.qrTool.getHistory()))[0]?.id).not.toBe(previousId)
+  await expect(page.locator('.status-pill.success')).toContainText('重构完成')
+  expect(await page.locator('.decode-output').textContent()).toBe(expectedContent)
+  const history = await page.evaluate(() => window.qrTool.getHistory())
+  const record = history[0]
+  expect(record?.type).toBe('rebuild')
+  expect(record?.content).toBe(expectedContent)
+  await decodeSavedPng(record!.savedPath, expectedContent)
+  return record!.savedPath
+}
+
+test('normalizes all image formats and variants and rebuilds them with both processes offline', async () => {
+  test.setTimeout(120_000)
+  await configureQr({ engine: 'local', size: 1024, errorCorrection: 'M', border: 2 })
+  await setMainNetworkBlocked(true)
+  const rendererNetwork: string[] = []
+  await page.context().route(/^https?:\/\//, (route) => {
+    rendererNetwork.push(route.request().url())
+    return route.abort()
+  })
+  const previousRequests = qrRequests.length
+  try {
+    for (const file of ['base.png', 'sample.jpg', 'sample.bmp', 'animated.gif', 'sample.webp',
+      'low-resolution.png', 'rotate-90.png', 'rotate-180.png', 'rotate-270.png',
+      'inverted.png', 'transparent.png', 'offset.png']) {
+      const saved = await chooseAndRebuild(path.join(decodeFixtures, file), decodeContent)
+      expect(path.basename(saved)).toBe(`${path.parse(file).name}_rebuild.png`)
+    }
+    const saved = await chooseAndRebuild(path.join(decodeFixtures, 'multiple.png'), decodeContent)
+    await expect(page.locator('.status-pill.success')).toContainText('共检测到 4 个二维码')
+    await chooseAndRebuild(saved, decodeContent)
+    expect(qrRequests.slice(previousRequests)).toEqual([])
+    expect((await mainNetworkAttempts()).filter((url) => !url.includes('github'))).toEqual([])
+    expect(rendererNetwork).toEqual([])
+    await page.waitForTimeout(650)
+    await page.screenshot({ path: 'test-results/v7.2-offline-rebuild.png' })
+  } finally {
+    await page.context().unroute(/^https?:\/\//)
+    await setMainNetworkBlocked(false)
+  }
+})
+
+test('drops a real file and keeps the entire conversion-to-save operation busy', async () => {
+  await page.getByRole('tab', { name: '图片重构' }).click()
+  await setMainNetworkBlocked(true)
+  await page.context().route(/^https?:\/\//, (route) => route.abort())
+  const previousId = (await page.evaluate(() => window.qrTool.getHistory()))[0]?.id
+  // Delay Chromium conversion so the UI guard and bitmap release can be observed.
+  await page.evaluate(() => {
+    const state = window as typeof window & { originalBitmap?: typeof createImageBitmap; bitmapClosed?: number }
+    state.originalBitmap = window.createImageBitmap
+    state.bitmapClosed = 0
+    window.createImageBitmap = (async (blob: Blob) => {
+      await new Promise((resolve) => setTimeout(resolve, 800))
+      const bitmap = await state.originalBitmap!(blob)
+      const close = bitmap.close.bind(bitmap)
+      bitmap.close = () => { state.bitmapClosed = (state.bitmapClosed ?? 0) + 1; close() }
+      return bitmap
+    }) as typeof createImageBitmap
+  })
+  const session = await page.context().newCDPSession(page)
+  try {
+    const box = await page.locator('.image-drop-zone').boundingBox()
+    if (!box) throw new Error('Drop zone unavailable')
+    const drag = { x: box.x + 40, y: box.y + 40,
+      data: { items: [], files: [path.join(decodeFixtures, 'sample.webp')], dragOperationsMask: 1 } }
+    await session.send('Input.dispatchDragEvent', { type: 'dragEnter', ...drag })
+    await session.send('Input.dispatchDragEvent', { type: 'dragOver', ...drag })
+    await session.send('Input.dispatchDragEvent', { type: 'drop', ...drag })
+    await expect(page.getByRole('button', { name: '正在处理…', exact: true })).toBeDisabled()
+    await session.send('Input.dispatchDragEvent', { type: 'dragEnter', ...drag })
+    await session.send('Input.dispatchDragEvent', { type: 'drop', ...drag })
+    await expect.poll(async () => (await page.evaluate(() => window.qrTool.getHistory()))[0]?.id).not.toBe(previousId)
+    await expect(page.locator('.status-pill.success')).toContainText('重构完成')
+    expect(await page.evaluate(() => (window as typeof window & { bitmapClosed?: number }).bitmapClosed)).toBe(1)
+    await decodeSavedPng(path.join(outputRoot, 'sample_rebuild.png'), decodeContent)
+    expect((await mainNetworkAttempts()).filter((url) => /read-qr-code|create-qr-code/.test(url))).toEqual([])
+  } finally {
+    await session.detach()
+    await page.evaluate(() => {
+      const state = window as typeof window & { originalBitmap?: typeof createImageBitmap }
+      if (state.originalBitmap) window.createImageBitmap = state.originalBitmap
+    })
+    await page.context().unroute(/^https?:\/\//)
+    await setMainNetworkBlocked(false)
+  }
+})
+
+test('rejects invalid and oversized images without history and retries the same image after recovery', async () => {
+  await page.getByRole('tab', { name: '图片重构' }).click()
+  await configureQr({ engine: 'local', size: 1024, errorCorrection: 'M', border: 2 })
+  const before = await page.evaluate(() => window.qrTool.getHistory())
+  for (const [file, message] of [
+    ['no-qr.png', '未识别到二维码'], ['corrupt.png', '图片无法读取'],
+    ['too-wide.png', '图片过大'], ['too-many-pixels.png', '图片过大'],
+    ['capacity.png', '二维码容量']
+  ]) {
+    await overrideOpenDialog(path.join(decodeFixtures, file!))
+    await page.getByRole('button', { name: '选择二维码图片', exact: true }).click()
+    await expect(page.locator('.status-pill.error')).toContainText(message!)
+    expect(await page.evaluate(() => window.qrTool.getHistory())).toEqual(before)
+    await expect(page.getByRole('button', { name: '重试此图片' })).toBeEnabled()
+  }
+  // A repair to the same selected path can be retried without a new file dialog.
+  const retryImage = path.join(dataRoot, 'repair.png')
+  await writeFile(retryImage, await readFile(path.join(decodeFixtures, 'no-qr.png')))
+  await overrideOpenDialog(retryImage)
+  await page.getByRole('button', { name: '选择二维码图片', exact: true }).click()
+  await expect(page.locator('.status-pill.error')).toContainText('未识别到二维码')
+  await writeFile(retryImage, await readFile(path.join(decodeFixtures, 'base.png')))
+  await page.getByRole('button', { name: '重试此图片' }).click()
+  await expect(page.locator('.status-pill.success')).toContainText('重构完成')
+  await decodeSavedPng(path.join(outputRoot, 'repair_rebuild.png'), decodeContent)
+
+  const oversized = path.join(dataRoot, 'oversized.png')
+  await writeFile(oversized, '')
+  await truncate(oversized, 32 * 1024 * 1024 + 1)
+  await overrideOpenDialog(oversized)
+  await page.getByRole('button', { name: '选择二维码图片', exact: true }).click()
+  await expect(page.locator('.status-pill.error')).toContainText('32 MiB')
+  // QR limits must not restrict background selection.
+  await overrideOpenDialog(path.join(decodeFixtures, 'too-wide.png'))
+  await page.evaluate(() => window.qrTool.chooseBackgroundImage())
+  await page.evaluate(() => window.qrTool.clearBackgroundImage())
+  expect(rendererErrors).toEqual([])
+})
+
+test('does not record a save failure and can retry after changing the save location', async () => {
+  const invalidDirectory = path.join(dataRoot, 'file-instead-of-directory')
+  await writeFile(invalidDirectory, 'not a directory')
+  await page.evaluate((directory) => window.qrTool.updateSettings({ output: { mode: 'custom', directory } }), invalidDirectory)
+  const before = await page.evaluate(() => window.qrTool.getHistory())
+  await overrideOpenDialog(path.join(decodeFixtures, 'base.png'))
+  await page.getByRole('button', { name: '选择二维码图片', exact: true }).click()
+  await expect(page.locator('.status-pill.error')).toContainText('保存失败')
+  expect(await page.evaluate(() => window.qrTool.getHistory())).toEqual(before)
+  await page.evaluate((directory) => window.qrTool.updateSettings({ output: { mode: 'custom', directory } }), outputRoot)
+  await page.getByRole('button', { name: '重试此图片' }).click()
+  await expect(page.locator('.status-pill.success')).toContainText('重构完成')
+  await decodeSavedPng(path.join(outputRoot, 'base_rebuild.png'), decodeContent)
+})
+
+test('only uploads an image for explicit online rebuild and snapshots an immediate local switch', async () => {
+  await configureQr({ engine: 'caoliao', size: 1024, errorCorrection: 'M', border: 2 })
+  const previousRequests = qrRequests.length
+  await chooseAndRebuild(path.join(decodeFixtures, 'sample.jpg'), 'https://example.com/plasma-e2e')
+  expect(qrRequests.slice(previousRequests).map((item) => item.split('?')[0])).toEqual([
+    '/v1/read-qr-code', '/v1/create-qr-code'
+  ])
+  const dialog = await openQrSettings()
+  await overrideOpenDialog(path.join(decodeFixtures, 'base.png'))
+  await setMainNetworkBlocked(true)
+  await page.context().route(/^https?:\/\//, (route) => route.abort())
+  try {
+    const previousId = (await page.evaluate(() => window.qrTool.getHistory()))[0]?.id
+    const stored = await dialog.evaluate(async (element) => {
+      const buttons = Array.from(element.querySelectorAll('button'))
+      buttons.find((button) => button.textContent?.trim() === '本地处理（离线）')?.click()
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      const engine = (await window.qrTool.bootstrap()).settings.qr.engine
+      buttons.find((button) => button.textContent?.trim() === '完成')?.click()
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.trim() === '选择二维码图片')?.click()
+      return engine
+    })
+    expect(stored).toBe('caoliao')
+    await expect.poll(async () => (await page.evaluate(() => window.qrTool.getHistory()))[0]?.id).not.toBe(previousId)
+    await expect(page.locator('.status-pill.success')).toContainText('重构完成')
+    expect(await page.locator('.decode-output').textContent()).toBe(decodeContent)
+    expect((await mainNetworkAttempts()).filter((url) => /read-qr-code|create-qr-code/.test(url))).toEqual([])
+    expect(qrRequests).toHaveLength(previousRequests + 2)
+  } finally {
+    await setMainNetworkBlocked(false)
+    await page.context().unroute(/^https?:\/\//)
+  }
+})

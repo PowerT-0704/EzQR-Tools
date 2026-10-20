@@ -9,7 +9,7 @@ const baseUrl = (process.env.QRTOOL_API_BASE_URL || 'https://api.2dcode.biz/v1')
   ''
 )
 const apiKey = (process.env.QRTOOL_API_KEY || '').trim()
-const headers = { 'User-Agent': 'EzQR-Tools/7.1.0' }
+const headers = { 'User-Agent': 'EzQR-Tools/7.2.0' }
 if (apiKey) headers.Authorization = `Bearer ${apiKey}`
 
 async function decode(filePath) {

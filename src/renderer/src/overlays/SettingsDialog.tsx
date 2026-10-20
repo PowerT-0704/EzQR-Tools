@@ -55,7 +55,7 @@ const CATEGORIES: Array<{
 }> = [
   { id: 'appearance', label: '外观与背景', description: '浅色氛围和背景图片' },
   { id: 'material', label: '玻璃材质', description: '透明度、折射和光感' },
-  { id: 'api', label: '接口与保存', description: '生成引擎、参数与保存' },
+  { id: 'api', label: '接口与保存', description: '处理引擎、参数与保存' },
   { id: 'data', label: '数据与关于', description: '数据目录和版本信息' }
 ]
 
@@ -399,33 +399,33 @@ export function SettingsDialog({
               <header className="settings-section-header">
                 <div>
                   <span className="section-kicker">连接与文件</span>
-                  <h3>生成引擎、参数与保存</h3>
-                  <p>文本生成和图片重构后的重新生成，共用下方引擎与参数。</p>
+                  <h3>处理引擎、参数与保存</h3>
+                  <p>文本生成、图片解析和重构，共用下方处理引擎与参数。</p>
                 </div>
               </header>
 
               <div className="setting-panel light-panel">
                 <div className="setting-row">
                   <div>
-                    <strong>生成引擎</strong>
+                    <strong>处理引擎</strong>
                     <p>
                       {settings.qr.engine === 'local'
-                        ? '内容在本机编码，断网也可生成。'
-                        : '生成内容将上传草料接口，需要联网。'}
+                        ? '图片解析和二维码生成均在本机完成，无需 API Key。'
+                        : '图片和生成内容将上传草料接口，需要联网。'}
                     </p>
                   </div>
                   <Segmented
-                    label="生成引擎"
+                    label="处理引擎"
                     value={settings.qr.engine}
                     items={[
-                      { value: 'local', label: '本地生成（离线）' },
+                      { value: 'local', label: '本地处理（离线）' },
                       { value: 'caoliao', label: '草料在线' }
                     ]}
                     onChange={(engine) => onPatch({ qr: { engine } })}
                   />
                 </div>
                 <p className="input-hint">
-                  图片解析仍使用草料在线服务：重构时会上传原始图片，需联网。
+                  默认本地处理，图片和文本不会上传；明确选择草料在线后，才会上传原始图片和生成内容。
                 </p>
               </div>
 

@@ -15,6 +15,7 @@ export class HistoryStore {
   private readonly filePath: string
   private limit: number
   private records: HistoryRecord[] = []
+  private pendingWrites: Promise<void> = Promise.resolve()
 
   constructor(configDir: string, limit: number) {
     this.filePath = path.join(configDir, 'history.json')
@@ -54,6 +55,12 @@ export class HistoryStore {
     this.records = this.records.slice(0, this.limit)
   }
 
+  private queueWrite<T>(write: () => Promise<T>): Promise<T> {
+    const operation = this.pendingWrites.then(write)
+    this.pendingWrites = operation.then(() => undefined, () => undefined)
+    return operation
+  }
+
   async add(
     type: HistoryRecord['type'],
     content: string,
@@ -66,26 +73,32 @@ export class HistoryStore {
       content,
       savedPath
     }
-    this.records.unshift(record)
-    this.records = this.records.slice(0, this.limit)
-    await this.save()
-    return structuredClone(record)
+    return this.queueWrite(async () => {
+      const records = [record, ...this.records].slice(0, this.limit)
+      await writeTextAtomic(this.filePath, `${JSON.stringify(records, null, 2)}\n`)
+      this.records = records.slice(0, this.limit)
+      return structuredClone(record)
+    })
   }
 
   async updateSavedPath(id: string, savedPath: string): Promise<void> {
-    const record = this.records.find((item) => item.id === id)
-    if (!record) return
-    record.savedPath = savedPath
-    await this.save()
+    return this.queueWrite(async () => {
+      if (!this.records.some((item) => item.id === id)) return
+      const records = this.records.map((item) => item.id === id ? { ...item, savedPath } : item)
+      await writeTextAtomic(this.filePath, `${JSON.stringify(records, null, 2)}\n`)
+      this.records = records.slice(0, this.limit)
+    })
   }
 
   async clear(): Promise<void> {
-    this.records = []
-    await this.save()
+    return this.queueWrite(async () => {
+      await writeTextAtomic(this.filePath, '[]\n')
+      this.records = []
+    })
   }
 
   async save(): Promise<void> {
-    await writeTextAtomic(this.filePath, `${JSON.stringify(this.records, null, 2)}\n`)
+    return this.queueWrite(() => writeTextAtomic(this.filePath, `${JSON.stringify(this.records, null, 2)}\n`))
   }
 }
 

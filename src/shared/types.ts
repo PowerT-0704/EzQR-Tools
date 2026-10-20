@@ -175,6 +175,7 @@ export interface BootstrapData {
 }
 
 export interface RebuildRequest {
+  normalizedPng?: Uint8Array
   operationId: string
   path: string
   qr?: QrSettings

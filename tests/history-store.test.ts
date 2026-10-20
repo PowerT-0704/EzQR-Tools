@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { HistoryStore } from '../src/main/services/history-store'
@@ -53,6 +53,36 @@ describe('HistoryStore', () => {
     await store.add('generate', 'hello')
     await store.clear()
     expect(store.get()).toEqual([])
+  })
+
+  it('keeps failed writes out of memory and permits subsequent concurrent additions', async () => {
+    const directory = await temporaryDirectory()
+    const store = new HistoryStore(directory, 10)
+    await store.add('generate', 'first')
+    const historyPath = path.join(directory, 'history.json')
+    await rm(historyPath)
+    await mkdir(historyPath)
+    await expect(store.add('rebuild', 'failed')).rejects.toThrow()
+    expect(store.get().map((record) => record.content)).toEqual(['first'])
+    await rm(historyPath, { recursive: true })
+    await Promise.all([store.add('rebuild', 'second'), store.add('generate', 'third')])
+    expect(store.get().map((record) => record.content)).toEqual(['third', 'second', 'first'])
+    const reloaded = new HistoryStore(directory, 10)
+    await reloaded.load()
+    expect(reloaded.get()).toEqual(store.get())
+  })
+
+  it('serializes additions, saved-path updates and clearing without resurrecting old records', async () => {
+    const directory = await temporaryDirectory()
+    const store = new HistoryStore(directory, 10)
+    const first = await store.add('generate', 'first')
+    await Promise.all([store.add('rebuild', 'second'), store.updateSavedPath(first.id, 'saved.png')])
+    expect(store.get().find((record) => record.id === first.id)?.savedPath).toBe('saved.png')
+    await Promise.all([store.add('rebuild', 'third'), store.clear()])
+    expect(store.get()).toEqual([])
+    const reloaded = new HistoryStore(directory, 10)
+    await reloaded.load()
+    expect(reloaded.get()).toEqual([])
   })
 })
 
