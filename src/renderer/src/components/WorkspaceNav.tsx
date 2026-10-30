@@ -33,6 +33,16 @@ const ITEMS: Array<{
         <circle cx="18" cy="17" r="2" />
       </svg>
     )
+  },
+  {
+    id: 'decode',
+    label: '二维码解析',
+    description: '本地解码不重构',
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M7 12h10M9 8h6M9 16h6" />
+      </svg>
+    )
   }
 ]
 
@@ -62,6 +72,7 @@ export function WorkspaceNav({
             key={item.id}
             type="button"
             role="tab"
+            aria-label={item.label}
             aria-selected={value === item.id}
             className={value === item.id ? 'active' : ''}
             onClick={() => onChange(item.id)}

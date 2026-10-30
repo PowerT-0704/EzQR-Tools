@@ -5,6 +5,7 @@ import { formatClock } from '../../../shared/format'
 import { GlassButton } from './GlassControls'
 
 interface FooterProps {
+  decodeOnly: boolean
   appVersion: string
   authorEmail: string
   apiStatus: ApiStatus
@@ -15,6 +16,7 @@ interface FooterProps {
 }
 
 export function Footer({
+  decodeOnly,
   appVersion,
   authorEmail,
   apiStatus,
@@ -41,30 +43,34 @@ export function Footer({
     >
       <div className="footer-api">
         <span className="footer-engine">
-          <span className={`status-dot ${qrEngine === 'local' ? 'ok' : ''}`} />
-          {qrEngine === 'local' ? '本地处理 · 可离线' : '草料在线处理'}
+          <span className={`status-dot ${decodeOnly || qrEngine === 'local' ? 'ok' : ''}`} />
+          {decodeOnly ? '本地解析 · 离线' : qrEngine === 'local' ? '本地处理 · 可离线' : '草料在线处理'}
         </span>
-        <span className="footer-online-label">在线接口</span>
-        <span
-          className={`status-dot ${
-            apiStatus.ok === true ? 'ok' : apiStatus.ok === false ? 'error' : apiBusy ? 'busy' : ''
-          }`}
-        />
-        <span className="footer-api-text" title={apiStatus.message}>
-          {apiBusy
-            ? '检测中…'
-            : apiStatus.ok === null
-              ? '未检测'
-              : apiStatus.message.replace(/^(接口状态|在线接口)[：:]\s*/, '')}
-        </span>
-        <GlassButton
-          size="sm"
-          disabled={apiBusy}
-          onClick={onRecheck}
-          className="footer-retry"
-        >
-          {apiBusy ? '检测中…' : '检测接口'}
-        </GlassButton>
+        {!decodeOnly && (
+          <>
+            <span className="footer-online-label">在线接口</span>
+            <span
+              className={`status-dot ${
+                apiStatus.ok === true ? 'ok' : apiStatus.ok === false ? 'error' : apiBusy ? 'busy' : ''
+              }`}
+            />
+            <span className="footer-api-text" title={apiStatus.message}>
+              {apiBusy
+                ? '检测中…'
+                : apiStatus.ok === null
+                  ? '未检测'
+                  : apiStatus.message.replace(/^(接口状态|在线接口)[：:]\s*/, '')}
+            </span>
+            <GlassButton
+              size="sm"
+              disabled={apiBusy}
+              onClick={onRecheck}
+              className="footer-retry"
+            >
+              {apiBusy ? '检测中…' : '检测接口'}
+            </GlassButton>
+          </>
+        )}
       </div>
       <div className="footer-meta">
         <button type="button" className="link-button" onClick={onCopyEmail}>

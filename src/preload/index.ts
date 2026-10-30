@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC } from '../shared/channels'
 import type {
   BootstrapData,
+  DecodeRequest,
+  DecodeResult,
   DataRootChange,
   AppSettingsView,
   ApiStatus,
@@ -48,6 +50,7 @@ const api: QrToolApi = {
   prepareDroppedImage: (path) =>
     invoke<MediaSelection>(IPC.prepareDroppedImage, path),
   rebuild: (request: RebuildRequest) => invoke<RebuildResult>(IPC.rebuild, request),
+  decode: (request: DecodeRequest) => invoke<DecodeResult>(IPC.decode, request),
   generate: (request: GenerateRequest) => invoke<GenerateResult>(IPC.generate, request),
   saveQr: (operationId: string) => invoke<SaveQrResult | null>(IPC.saveQr, operationId),
   chooseTextFile: () => invoke<TextImportResult | null>(IPC.chooseTextFile),

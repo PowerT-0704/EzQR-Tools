@@ -8,7 +8,7 @@
 
 一款面向 Windows 的本地优先二维码工作台。拖入图片即可解析并重构，输入文字即可生成高清 PNG；日常生成、解析、保存和历史记录均可离线完成，无需注册或配置 API Key。
 
-![版本](https://img.shields.io/badge/version-7.2.0-526edb?style=flat-square)
+![版本](https://img.shields.io/badge/version-7.3.0-526edb?style=flat-square)
 ![平台](https://img.shields.io/badge/platform-Windows%2010%2F11-5b7cff?style=flat-square)
 ![Electron](https://img.shields.io/badge/Electron-44-2f6f8f?style=flat-square)
 ![Plasma UI](https://img.shields.io/badge/UI-Plasma%20Liquid%20Glass-7c66d9?style=flat-square)
@@ -16,12 +16,12 @@
 [![Release](https://img.shields.io/github/v/release/PowerT-0704/EzQR-Tools?style=flat-square)](https://github.com/PowerT-0704/EzQR-Tools/releases/latest)
 [![GitHub](https://img.shields.io/badge/GitHub-PowerT--0704-24292f?style=flat-square&logo=github)](https://github.com/PowerT-0704/EzQR-Tools)
 
-<sub>CDUT 学生项目 · 非官方工具 · Windows x64</sub>
+<sub>CDUT 学生项目 · 非官方工具 · Windows x64 · <a href="https://w3f7-ezqr-tool.netlify.app/">项目官网</a></sub>
 
 </div>
 
 <p align="center">
-  <img src="docs/images/ezqr-main.png" width="960" alt="易码 EzQR-Tools 主界面" />
+  <img src="docs/images/v7.3-decode-main.png" width="960" alt="易码 EzQR-Tools 主界面" />
 </p>
 
 <p align="center"><sub>浅色液态玻璃工作台：左侧切换工作区，右侧固定预览，高频操作在一屏内完成。</sub></p>
@@ -36,6 +36,7 @@
 
 | | 能做什么 |
 | --- | --- |
+| 🔍 二维码解析 | 始终本地读取图片，按位置展示全部二维码内容并逐条复制，不重构、不保存图片、不写历史 |
 | 🖼️ 图片重构 | 断网拖入二维码图片，在本机读取内容并重新生成高清 PNG，原图与结果可随时切换预览 |
 | ⌨️ 本地生成 | 输入文字、链接或多行内容，断网也可生成二维码并下载，支持尺寸、纠错与边框设置 |
 | 🗂️ 本地文档 | 支持 TXT、Markdown、JSON、Word、ODT、RTF 等常见文本格式 |
@@ -61,7 +62,7 @@
   <img src="docs/images/ezqr-local-settings.png" width="720" alt="本地处理引擎、二维码尺寸、纠错级别和边框设置" />
 </p>
 
-<p align="center"><sub>v7.2 使用统一处理引擎；默认本地解析与生成，图片和文本均不上传。</sub></p>
+<p align="center"><sub>处理引擎控制文本生成和图片重构；v7.3 新增的独立“二维码解析”始终本地处理。</sub></p>
 
 <p align="center">
   <img src="docs/images/ezqr-update.png" width="720" alt="软件设置中的 GitHub 更新检查" />
@@ -71,21 +72,21 @@
 
 ## 🚀 下载与安装
 
-**[下载易码 EzQR-Tools v7.2.0](https://github.com/PowerT-0704/EzQR-Tools/releases/tag/v7.2.0)** · Windows 10/11 x64
+**[下载易码 EzQR-Tools v7.3.0](https://github.com/PowerT-0704/EzQR-Tools/releases/tag/v7.3.0)** · Windows 10/11 x64
 
 | 文件 | 下载 |
 | --- | --- |
-| Windows x64 安装器（约 109.64 MiB） | [EzQR-Tools-7.2.0-x64-Setup.exe](https://github.com/PowerT-0704/EzQR-Tools/releases/download/v7.2.0/EzQR-Tools-7.2.0-x64-Setup.exe) |
-| SHA-256 校验文件 | [SHA256SUMS-7.2.0.txt](https://github.com/PowerT-0704/EzQR-Tools/releases/download/v7.2.0/SHA256SUMS-7.2.0.txt) |
+| Windows x64 安装器（约 109.52 MiB） | [EzQR-Tools-7.3.0-x64-Setup.exe](https://github.com/PowerT-0704/EzQR-Tools/releases/download/v7.3.0/EzQR-Tools-7.3.0-x64-Setup.exe) |
+| SHA-256 校验文件 | [SHA256SUMS-7.3.0.txt](https://github.com/PowerT-0704/EzQR-Tools/releases/download/v7.3.0/SHA256SUMS-7.3.0.txt) |
 
-详细变更见 [发布说明](docs/releases/v7.2.0.md)，测试范围与已知限制见 [交付与验收报告](docs/releases/v7.2.0-validation.md)。安装器未进行代码签名，Windows 可能显示 SmartScreen 提示。
+详细变更见 [发布说明](docs/releases/v7.3.0.md)，测试范围与已知限制见 [交付与验收报告](docs/releases/v7.3.0-validation.md)。安装器未进行代码签名，Windows 可能显示 SmartScreen 提示。
 
 ### 安装与第一次使用
 
 1. 下载上面的安装器和校验文件，按下方步骤核对 SHA-256。
 2. 运行安装器，选择安装目录和需要的快捷方式。
 3. 打开“软件设置 → 接口与保存”，确认“处理引擎”为“本地处理（离线）”。新安装默认选择本地，无需填写接口密钥。
-4. 在“图片重构”中选择或拖入图片，成功后自动保存 PNG；在“文本生成”中输入内容，生成后点击“下载二维码”选择保存位置。
+4. 只需要读取内容时，切换到“二维码解析”选择或拖入图片，可查看全部结果并逐条复制，无需调整引擎设置。需要输出图片时，使用“图片重构”自动保存 PNG，或在“文本生成”生成后点击下载。
 5. 点击“历史记录”查看处理内容与保存路径。断网时以上流程仍可使用；GitHub 更新检查失败不会阻塞处理。
 
 ### 校验下载文件
@@ -93,15 +94,15 @@
 将两个文件放在同一文件夹，在该文件夹打开 PowerShell：
 
 ```powershell
-$expectedHash = ((Get-Content -LiteralPath './SHA256SUMS-7.2.0.txt' -Raw).Trim() -split '\s+')[0]
-$actualHash = (Get-FileHash -LiteralPath './EzQR-Tools-7.2.0-x64-Setup.exe' -Algorithm SHA256).Hash
+$expectedHash = ((Get-Content -LiteralPath './SHA256SUMS-7.3.0.txt' -Raw).Trim() -split '\s+')[0]
+$actualHash = (Get-FileHash -LiteralPath './EzQR-Tools-7.3.0-x64-Setup.exe' -Algorithm SHA256).Hash
 $actualHash -eq $expectedHash  # 应输出 True
 ```
 
-v7.2.0 安装器 SHA-256：
+v7.3.0 安装器 SHA-256：
 
 ```text
-BFC8D06D41CA41B580A821230E0CC0B75448BB4C80DD20F4C1F2907D14B3B986
+3C74322234836F7C257A669FF45E30D39AC7FCC1FC2E54931BA710D02B9FADF8
 ```
 
 若不匹配，请重新下载并核对。SHA-256 用于验证文件与发布附件一致，不代替代码签名。
@@ -134,21 +135,23 @@ npx install-electron --no
 
 - 文本生成默认使用本地编码器，无需联网或接口密钥；重构后的重新编码也默认在本机完成。
 - 图片默认用随应用打包的 `zxing-wasm@3.1.6/reader` 本地解析，WASM 不从 CDN 下载。PNG、JPG/JPEG、BMP、GIF、WebP 由 Chromium 转换为白底 PNG，动画取首帧。
-- “软件设置 → 接口与保存 → 处理引擎”统一控制解析与生成；只有明确选择草料在线时才上传原始图片与生成内容。本地失败不回退在线。有效的旧引擎选择会保留，缺少引擎字段则默认本地。
+- 独立“二维码解析”固定本地，即使设置选择草料也不上传；仅显示结果，不受纠错、尺寸、边框、保存目录等生成参数影响。
+- “软件设置 → 接口与保存 → 处理引擎”控制文本生成与图片重构；明确选择草料在线时才上传相关图片和生成内容。本地失败不回退在线，保留有效旧选择，缺少字段则默认本地。
 - 二维码源图最多 32 MiB、单边 8192 像素、总像素 16777216，规范化 PNG 最多 64 MiB；超限请裁剪或缩小，不静默缩放。这些限制不影响背景图片选择。
-- 多码按图片位置从上到下、从左到右排序，重构首个并提示总数。失败可重试同一图片，失败任务不新增成功历史。
+- 多码按位置排列。独立解析展示全部结果并保留重复项，完整显示和复制原文；图片重构仍只重构首个并提示总数。失败可重试同一图片。
 - 默认输出 1024×1024 PNG、M 纠错、2 模块边框；支持 128–4096 像素、L/M/Q/H 和 0–16 模块边框。边框为 0 时扫描器可能需要图片外的白色留白。
 - 已移除旧的 900 字警告与 2000 字导入限制；950 个常见汉字使用 L 纠错可生成。容量取决于内容编码与纠错级别，不能无限增加；不足时会提示手动调整。
 - 生成保留首尾空白和换行。文本导入仍限制 5 MiB 文件、5 万字符，防止意外导入过大文档。
 - 启动不再自动检测草料生成接口；手动接口检测和 GitHub 静默更新检查仍会联网。
 - 应用内更新检查只提示新版本并打开 GitHub Release，不自动下载或安装。
-- 项目官网入口保留为“即将上线”；项目源码、问题反馈和版本发布统一使用 GitHub。
+- [项目官网](https://w3f7-ezqr-tool.netlify.app/) 提供产品介绍、使用说明与下载入口；源码、问题反馈及安装器附件由 GitHub 托管。
+- 本版将 Electron 升至 44.9.1、fast-uri 升至 3.1.9，修补已报告的证书与 URI 处理告警。发布前全量及生产依赖审计均通过，详见验收报告。
 
 ## 使用说明与常见问题
 
 ### 图片与保存
 
-支持 PNG、JPG/JPEG、BMP、GIF、WebP。动画图片只读取首帧，透明区域转为白底供解析，原图预览保持原样。检测到多个二维码时，按位置从上到下、从左到右排列，界面提示数量并重构第一个；如需处理其他码，请先裁剪到目标区域。
+支持 PNG、JPG/JPEG、BMP、GIF、WebP。动画图片只读取首帧，透明区域转为白底供解析，原图预览保持原样。在“二维码解析”中，多码按位置排列并全部展示，每条可复制，退出应用后不保留解析结果；“图片重构”仍只重构第一个并提示数量，需要重构其他码时可裁剪到目标区域。
 
 重构图片默认保存在原图目录，命名为 `原文件名_rebuild.png`；同名结果可能被替换。再次导入文件名以 `_rebuild` 结尾的图片时，会使用 `_rebuild_1.png` 等可用编号。“软件设置 → 接口与保存 → 二维码保存模式”可改为自定义目录。文本生成的下载通过保存对话框选择文件名与位置。
 
@@ -215,7 +218,7 @@ npm run build       # 生产构建
 npm run dist:win    # Windows x64 NSIS 安装器
 ```
 
-安装器输出到 `release\EzQR-Tools-7.2.0-x64-Setup.exe`，不会生成 ZIP。安装器当前未进行代码签名，Windows 可能显示 SmartScreen 提示；卸载或迁移前请备份“软件设置 → 数据与关于”显示的实际数据目录中的 `config` 文件夹。
+安装器输出到 `release\EzQR-Tools-7.3.0-x64-Setup.exe`，不会生成 ZIP。安装器当前未进行代码签名，Windows 可能显示 SmartScreen 提示；卸载或迁移前请备份“软件设置 → 数据与关于”显示的实际数据目录中的 `config` 文件夹。
 
 可选的草料适配器联网冒烟测试（会上传指定图片，并调用在线生成；不代表默认本地处理流程）：
 
@@ -248,7 +251,7 @@ python scripts/generate_brand_assets.py
 | --- | --- |
 | `v7.1`（已完成） | 本地二维码编码器、离线文本生成、重构后本地编码与可选在线生成 |
 | `v7.2`（已完成） | 引入本地 ZXing/WASM 解码，图片解析与重构不再依赖草料接口 |
-| `v7.3` | 继续完善离线状态与在线兼容体验；统一离线开关已随 v7.2 提前完成 |
+| `v7.3`（已完成） | 独立纯本地解析、多码全文展示与逐条复制、原图预览、加载动画及安全修补 |
 | 后续 | 批量处理、SVG/PDF、二维码样式、Logo 嵌入、自动更新与跨平台构建 |
 
 详细拆分、技术选型和验收标准见 **[docs/ROADMAP.md](docs/ROADMAP.md)**。

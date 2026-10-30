@@ -4,6 +4,7 @@ import type {
   ApiStatus,
   AppSettingsView,
   BootstrapData,
+  DecodeResult,
   GenerateResult,
   HistoryRecord,
   MediaSelection,
@@ -27,6 +28,7 @@ import { AlertDialog, type AlertState } from './overlays/AlertDialog'
 import { SettingsDialog } from './overlays/SettingsDialog'
 import { GeneratePage } from './pages/GeneratePage'
 import { RebuildPage } from './pages/RebuildPage'
+import { DecodePage } from './pages/DecodePage'
 import type { UiStatus } from './types'
 
 type DialogName = 'settings' | 'announcement' | 'history' | null
@@ -122,6 +124,13 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
   })
   const [rebuildResult, setRebuildResult] = useState<RebuildResult | null>(null)
 
+  const [decodeBusy, setDecodeBusy] = useState(false)
+  const decodeInFlight = useRef(false)
+  const decodeOperation = useRef('')
+  const [decodeSelection, setDecodeSelection] = useState<MediaSelection | null>(null)
+  const [decodeResult, setDecodeResult] = useState<DecodeResult | null>(null)
+  const [decodeStatus, setDecodeStatus] = useState<UiStatus>({ kind: 'idle', message: '等待选择图片…' })
+
   const [content, setContent] = useState('')
   const [generateBusy, setGenerateBusy] = useState(false)
   const [generateStatus, setGenerateStatus] = useState<UiStatus>({
@@ -216,6 +225,9 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
       } else if (event.key === '2') {
         event.preventDefault()
         setWorkspace('generate')
+      } else if (event.key === '3') {
+        event.preventDefault()
+        setWorkspace('decode')
       } else if (event.key.toLowerCase() === 'h') {
         if (!alert && (!dialog || dialog === 'history')) {
           event.preventDefault()
@@ -285,6 +297,45 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
     },
     [flushSettings, showToast]
   )
+
+  const beginDecode = useCallback(async (selection: MediaSelection): Promise<void> => {
+    if (decodeInFlight.current) return
+    decodeInFlight.current = true
+    const operationId = createOperationId('decode')
+    decodeOperation.current = operationId
+    setDecodeBusy(true)
+    setDecodeSelection(selection)
+    setDecodeResult(null)
+    setDecodeStatus({ kind: 'busy', message: '正在读取并转换图片…' })
+    try {
+      // Refresh the media URL on retry, including when the same file was repaired.
+      const source = await window.qrTool.prepareDroppedImage(selection.path)
+      setDecodeSelection(source)
+      const normalizedPng = await normalizeQrImage(source.previewUrl)
+      const result = await window.qrTool.decode({ operationId, path: source.path, normalizedPng })
+      setDecodeSelection({ ...source, previewUrl: result.sourcePreviewUrl })
+      setDecodeResult(result)
+      setDecodeStatus({ kind: 'success', message: `解析完成，识别到 ${result.contents.length} 个二维码` })
+    } catch (error) {
+      setDecodeStatus({ kind: 'error', message: errorMessage(error) })
+    } finally {
+      decodeInFlight.current = false
+      decodeOperation.current = ''
+      setDecodeBusy(false)
+    }
+  }, [])
+
+  const chooseDecodeImage = useCallback(async (): Promise<void> => {
+    if (decodeInFlight.current) return
+    try {
+      const selection = await window.qrTool.chooseImage()
+      if (selection) await beginDecode(selection)
+    } catch (error) {
+      setDecodeResult(null)
+      setDecodeSelection(null)
+      setDecodeStatus({ kind: 'error', message: errorMessage(error) })
+    }
+  }, [beginDecode])
 
   const beginRebuild = useCallback(
     async (selection: MediaSelection): Promise<void> => {
@@ -395,6 +446,12 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
   }, [openAlert])
 
   const handleProgress = useCallback((event: OperationProgress): void => {
+    if (event.kind === 'decode') {
+      if (decodeOperation.current && event.operationId === decodeOperation.current) {
+        setDecodeStatus({ kind: 'busy', message: event.message })
+      }
+      return
+    }
     if (!activeOperation.current || event.operationId !== activeOperation.current) return
     if (event.kind === 'rebuild') {
       setRebuildStatus({ kind: 'busy', message: event.message })
@@ -418,20 +475,28 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
       event.preventDefault()
       dragDepth.current = 0
       setDragging(false)
-      if (rebuildInFlight.current) return
+      const decodeOnly = workspace === 'decode'
+      if (decodeOnly ? decodeInFlight.current : rebuildInFlight.current) return
       const file = event.dataTransfer.files[0]
       if (!file) return
       try {
         const filePath = window.qrTool.pathForFile(file)
         if (!filePath) throw new Error('无法获取拖入文件的本地路径')
         const selection = await window.qrTool.prepareDroppedImage(filePath)
-        await beginRebuild(selection)
+        if (decodeOnly) await beginDecode(selection)
+        else await beginRebuild(selection)
       } catch (error) {
-        setWorkspace('rebuild')
-        setRebuildStatus({ kind: 'error', message: errorMessage(error) })
+        if (decodeOnly) {
+          setDecodeResult(null)
+          setDecodeSelection(null)
+          setDecodeStatus({ kind: 'error', message: errorMessage(error) })
+        } else {
+          setWorkspace('rebuild')
+          setRebuildStatus({ kind: 'error', message: errorMessage(error) })
+        }
       }
     },
-    [beginRebuild]
+    [beginRebuild, beginDecode, workspace]
   )
 
   const reuseHistory = useCallback(
@@ -512,6 +577,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
         onDrop={(event) => void onDrop(event)}
       >
         <TitleBar
+          decodeOnly={workspace === 'decode'}
           maximized={windowState.maximized}
           apiOk={apiStatus.ok}
           apiBusy={apiBusy}
@@ -552,6 +618,16 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
                 onOpenImage={(path) => void window.qrTool.openPath(path)}
                 onCopy={(text) => void copyText(text)}
               />
+            ) : workspace === 'decode' ? (
+              <DecodePage
+                busy={decodeBusy}
+                status={decodeStatus}
+                result={decodeResult}
+                onChoose={() => void chooseDecodeImage()}
+                onRetry={decodeSelection && decodeStatus.kind === 'error'
+                  ? () => void beginDecode(decodeSelection) : undefined}
+                onCopy={(text) => void copyText(text)}
+              />
             ) : (
               <GeneratePage
                 qrEngine={settings.qr.engine}
@@ -570,6 +646,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
 
           <div className="preview-area">
             <PreviewDock
+              decodeSelection={decodeSelection}
               workspace={workspace}
               rebuildResult={rebuildResult}
               generateResult={generateResult}
@@ -582,6 +659,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
         </main>
 
         <Footer
+          decodeOnly={workspace === 'decode'}
           appVersion={boot.appVersion}
           authorEmail={boot.authorEmail}
           apiStatus={apiStatus}
@@ -595,7 +673,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
           <div className="drop-overlay" aria-hidden="true">
             <div>
               <strong>释放以解析二维码</strong>
-              <span>图片会自动进入重构工作区</span>
+              <span>{workspace === 'decode' ? '仅在本机解析，不生成新图片' : '图片会自动进入重构工作区'}</span>
             </div>
           </div>
         )}

@@ -13,7 +13,7 @@ describe('EzQR-Tools branding', () => {
     expect(APP_NAME).toBe('易码 EzQR-Tools')
     expect(APP_USER_MODEL_ID).toBe('W3F7.EzQRTools')
     expect(packageJson.name).toBe('ezqr-tools')
-    expect(packageJson.version).toBe('7.2.0')
+    expect(packageJson.version).toBe('7.3.0')
     expect(packageJson.description).toContain('易码 EzQR-Tools')
   })
 

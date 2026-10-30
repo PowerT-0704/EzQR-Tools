@@ -10,6 +10,8 @@ interface MediaEntry {
   createdAt: number
 }
 
+type PreviewSlot = 'background' | 'generated' | 'rebuilt' | 'rebuild-source' | 'decode-source'
+
 const MIME_BY_EXTENSION: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -22,22 +24,25 @@ const MIME_BY_EXTENSION: Record<string, string> = {
 export class MediaStore {
   private readonly entries = new Map<string, MediaEntry>()
   private readonly maxEntries = 40
+  private readonly previews = new Map<PreviewSlot, string>()
 
-  addFile(filePath: string): string {
+  addFile(filePath: string, preview?: PreviewSlot): string {
     const extension = path.extname(filePath).toLowerCase()
     const mime = MIME_BY_EXTENSION[extension] ?? 'application/octet-stream'
-    return this.add({ filePath, mime, createdAt: Date.now() })
+    return this.add({ filePath, mime, createdAt: Date.now() }, preview)
   }
 
-  addBuffer(data: Buffer, mime = 'image/png'): string {
-    return this.add({ data, mime, createdAt: Date.now() })
+  addBuffer(data: Buffer, mime = 'image/png', preview?: PreviewSlot): string {
+    return this.add({ data, mime, createdAt: Date.now() }, preview)
   }
 
-  private add(entry: MediaEntry): string {
+  private add(entry: MediaEntry, preview?: PreviewSlot): string {
     const token = randomUUID()
     this.entries.set(token, entry)
+    if (preview) this.previews.set(preview, token)
     while (this.entries.size > this.maxEntries) {
-      const oldest = this.entries.keys().next().value as string | undefined
+      const retained = new Set(this.previews.values())
+      const oldest = [...this.entries.keys()].find((key) => !retained.has(key))
       if (!oldest) break
       this.entries.delete(oldest)
     }

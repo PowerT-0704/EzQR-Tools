@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Plasma } from '@cruxgarden/plasma-ui'
-import type { GenerateResult, RebuildResult, WorkspaceId } from '../../../shared/types'
+import type { GenerateResult, MediaSelection, RebuildResult, WorkspaceId } from '../../../shared/types'
 
 interface PreviewDockProps {
+  decodeSelection: MediaSelection | null
   workspace: WorkspaceId
   rebuildResult: RebuildResult | null
   generateResult: GenerateResult | null
@@ -13,6 +14,7 @@ interface PreviewDockProps {
 }
 
 export function PreviewDock({
+  decodeSelection,
   workspace,
   rebuildResult,
   generateResult,
@@ -22,10 +24,36 @@ export function PreviewDock({
   onSave
 }: PreviewDockProps): React.JSX.Element {
   const [imageView, setImageView] = useState<'rebuilt' | 'source'>('rebuilt')
+  const [sourceFailed, setSourceFailed] = useState(false)
+
+  useEffect(() => setSourceFailed(false), [decodeSelection?.previewUrl])
 
   useEffect(() => {
     setImageView('rebuilt')
   }, [rebuildResult])
+
+  if (workspace === 'decode') {
+    return (
+      <Plasma as="aside" className="preview-dock" aria-label="原图预览" fuse={false} lean={false}>
+        <header className="dock-header">
+          <div><span className="section-kicker">预览</span><h2>原图预览</h2></div>
+          <span className="dock-state">仅解析</span>
+        </header>
+        <div className={`preview-canvas ${decodeSelection && !sourceFailed ? 'has-image' : ''}`}>
+          {decodeSelection && !sourceFailed ? (
+            <img src={decodeSelection.previewUrl} alt="待解析的二维码原图" onError={() => setSourceFailed(true)} />
+          ) : (
+            <div className="preview-empty"><span className="preview-empty-mark" aria-hidden="true">码</span>
+              <strong>{sourceFailed ? '原图无法预览' : '等待导入图片'}</strong>
+              <p>此处仅显示原始图片，不生成新的二维码。</p>
+            </div>
+          )}
+        </div>
+        <div className="preview-details"><span>原始路径</span><code title={decodeSelection?.path}>{decodeSelection?.path || '尚未选择图片'}</code></div>
+        <div className="preview-actions"><span className="preview-action-hint">解析内容显示在结果栏，不保存图片或历史。</span></div>
+      </Plasma>
+    )
+  }
 
   const hasRebuild = workspace === 'rebuild' && rebuildResult !== null
   const hasGenerate = workspace === 'generate' && generateResult !== null

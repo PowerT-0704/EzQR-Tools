@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http'
-import { mkdtemp, mkdir, readFile, rm, stat, truncate, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, truncate, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import QRCode from 'qrcode'
@@ -25,7 +25,7 @@ let electronApp: ElectronApplication
 let page: Page
 let dataRoot: string
 let outputRoot: string
-let mockReleaseTag = 'v7.3.0'
+let mockReleaseTag = 'v7.4.0'
 const rendererErrors: string[] = []
 const qrRequests: string[] = []
 
@@ -290,7 +290,7 @@ test.beforeAll(async () => {
     }
   })
   await page.waitForSelector('.app-shell')
-  expect(await page.evaluate(async () => (await window.qrTool.bootstrap()).appVersion)).toBe('7.2.0')
+  expect(await page.evaluate(async () => (await window.qrTool.bootstrap()).appVersion)).toBe('7.3.0')
 })
 
 test.afterAll(async () => {
@@ -299,7 +299,7 @@ test.afterAll(async () => {
   await rm(dataRoot, { recursive: true, force: true })
 })
 
-test('renders the light two-workspace layout without fused surfaces', async () => {
+test('renders the light three-workspace layout without fused surfaces', async () => {
   expect(qrRequests).toEqual([])
   await expect(page).toHaveTitle('易码 EzQR-Tools')
   await expect(page.getByText('易码 EzQR-Tools')).toBeVisible()
@@ -311,6 +311,8 @@ test('renders the light two-workspace layout without fused surfaces', async () =
   expect(await brandLogo.evaluate((element) => getComputedStyle(element).width)).toBe('40px')
   await expect(page.getByRole('tab', { name: '图片重构' })).toBeVisible()
   await expect(page.getByRole('tab', { name: '文本生成' })).toBeVisible()
+  await expect(page.getByRole('tab', { name: '二维码解析', exact: true })).toBeVisible()
+  await expect(page.locator('.workspace-nav-track').getByRole('tab')).toHaveCount(3)
   await expect(page.getByRole('button', { name: /历史记录/ })).toBeVisible()
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(237, 244, 255)')
 
@@ -404,15 +406,15 @@ test('shows GitHub release updates and handles the latest-version state', async 
     .locator('.settings-nav')
     .getByRole('tab', { name: /数据与关于/ })
     .click()
-  await expect(settingsDialog.getByText('发现新版本 v7.3.0')).toBeVisible()
+  await expect(settingsDialog.getByText('发现新版本 v7.4.0')).toBeVisible()
   await expect(
     settingsDialog.getByRole('button', { name: '查看 GitHub Release' })
   ).toBeEnabled()
-  await expect(settingsDialog.getByText('最新版本 v7.3.0')).toBeVisible()
+  await expect(settingsDialog.getByText('最新版本 v7.4.0')).toBeVisible()
   await page.waitForTimeout(320)
   await page.screenshot({ path: 'test-results/qrtool-light-update.png' })
 
-  mockReleaseTag = 'v7.2.0'
+  mockReleaseTag = 'v7.3.0'
   await settingsDialog.getByRole('button', { name: '检查更新' }).click()
   await expect(settingsDialog.getByText('已是最新版本', { exact: true })).toBeVisible()
   await expect(settingsButton.locator('.update-indicator')).not.toBeVisible()
@@ -590,12 +592,12 @@ test('opens Chinese settings and announcement overlays', async () => {
   await page.getByRole('button', { name: '开发公告' }).click()
   await expect(page.getByRole('dialog', { name: '开发公告' })).toBeVisible()
   await page.waitForTimeout(300)
-  await expect(page.getByText('v7.2.0', { exact: false }).first()).toBeVisible()
+  await expect(page.getByText('v7.3.0', { exact: false }).first()).toBeVisible()
   const announcementDialog = page.getByRole('dialog', { name: '开发公告' })
   const announcementClose = await expectModalCloseHitbox(announcementDialog)
   await expect(
-    announcementDialog.getByRole('button', { name: '项目官网（即将上线）' })
-  ).toBeDisabled()
+    announcementDialog.getByRole('button', { name: '项目官网', exact: true })
+  ).toBeEnabled()
   await expect(
     announcementDialog.getByRole('button', { name: 'Plasma UI 项目' })
   ).toBeEnabled()
@@ -1127,4 +1129,234 @@ test('only uploads an image for explicit online rebuild and snapshots an immedia
     await setMainNetworkBlocked(false)
     await page.context().unroute(/^https?:\/\//)
   }
+})
+
+async function outputSnapshot(): Promise<unknown[]> {
+  return Promise.all((await readdir(outputRoot)).sort().map(async (name) => {
+    const info = await stat(path.join(outputRoot, name))
+    return [name, info.size, info.mtimeMs]
+  }))
+}
+
+async function chooseAndDecode(source: string, contents: string[]): Promise<void> {
+  await page.getByRole('tab', { name: '二维码解析', exact: true }).click()
+  const preview = page.getByAltText('待解析的二维码原图')
+  const previousUrl = await preview.count() ? await preview.getAttribute('src') : null
+  await overrideOpenDialog(source)
+  await page.getByRole('button', { name: '选择二维码图片', exact: true }).click()
+  await expect(preview).toBeVisible()
+  if (previousUrl) await expect(preview).not.toHaveAttribute('src', previousUrl)
+  await expect(page.locator('.decode-task .status-pill.success')).toContainText('解析完成')
+  expect(await page.locator('.decode-task .decode-output').allTextContents()).toEqual(contents)
+  await expect(page.getByRole('button', { name: '下载二维码', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '打开重构图片', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '打开输出文件夹', exact: true })).toHaveCount(0)
+}
+
+test('standalone decode is local for all formats even with online engine settings and never writes history or output', async () => {
+  test.setTimeout(90_000)
+  await configureQr({ engine: 'caoliao', size: 128, errorCorrection: 'H', border: 16 })
+  const beforeHistory = await page.evaluate(() => window.qrTool.getHistory())
+  const beforeFiles = await outputSnapshot()
+  const previousRequests = qrRequests.length
+  const rendererNetwork: string[] = []
+  await setMainNetworkBlocked(true)
+  await page.context().route(/^https?:\/\//, (route) => { rendererNetwork.push(route.request().url()); return route.abort() })
+  try {
+    for (const file of ['base.png', 'sample.jpg', 'sample.bmp', 'animated.gif', 'sample.webp',
+      'rotate-90.png', 'rotate-180.png', 'rotate-270.png', 'low-resolution.png', 'inverted.png', 'transparent.png', 'offset.png']) {
+      await chooseAndDecode(path.join(decodeFixtures, file), [decodeContent])
+    }
+    await expect(page.locator('.footer-engine')).toHaveText('本地解析 · 离线')
+    await expect(page.getByRole('button', { name: '检测接口', exact: true })).toHaveCount(0)
+    await expect(page.locator('.header-status')).toHaveAttribute('title', /本地解析/)
+    expect((await page.evaluate(() => window.qrTool.bootstrap())).settings.qr.engine).toBe('caoliao')
+    expect(await page.evaluate(() => window.qrTool.getHistory())).toEqual(beforeHistory)
+    expect(await outputSnapshot()).toEqual(beforeFiles)
+    expect(await mainNetworkAttempts()).toEqual([])
+    expect(rendererNetwork).toEqual([])
+    expect(qrRequests.slice(previousRequests)).toEqual([])
+  } finally {
+    await setMainNetworkBlocked(false)
+    await page.context().unroute(/^https?:\/\//)
+  }
+})
+
+test('standalone decode shows every positioned result including duplicates and copies exact text', async () => {
+  const before = await page.evaluate(() => window.qrTool.getHistory())
+  const contents = [decodeContent, 'second QR', 'third QR', decodeContent]
+  await chooseAndDecode(path.join(decodeFixtures, 'multiple.png'), contents)
+  await expect(page.getByRole('heading', { name: '共识别 4 个二维码' })).toBeVisible()
+  for (let index = 0; index < contents.length; index += 1) {
+    const copy = page.getByRole('button', { name: `复制二维码 ${index + 1} 内容`, exact: true })
+    await copy.scrollIntoViewIfNeeded()
+    await copy.click()
+    expect(await electronApp.evaluate(({ clipboard }) => clipboard.readText())).toBe(contents[index])
+  }
+  await page.getByRole('tab', { name: '文本生成' }).click()
+  await page.getByRole('tab', { name: '二维码解析', exact: true }).click()
+  expect(await page.locator('.decode-task .decode-output').allTextContents()).toEqual(contents)
+  expect(await page.evaluate(() => window.qrTool.getHistory())).toEqual(before)
+  for (const [width, height] of [[1120, 780], [980, 700], [1440, 960]]) {
+    await electronApp.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0]?.setSize(size[0]!, size[1]!), [width!, height!])
+    await page.waitForTimeout(350)
+    await expect(page.getByRole('tab', { name: '二维码解析', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: '复制二维码 4 内容', exact: true }).scrollIntoViewIfNeeded()
+    expect(await page.getByRole('tab', { name: '二维码解析', exact: true }).locator('strong').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+    const within = await page.getByRole('button', { name: '复制二维码 4 内容', exact: true }).evaluate((element) => {
+      const box = element.getBoundingClientRect()
+      return box.top >= 0 && box.bottom <= innerHeight && box.right <= innerWidth
+    })
+    expect(within).toBe(true)
+    expect(await page.locator('.decode-task .image-drop-zone').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+    await page.locator('.decode-results').evaluate((element) => element.scrollTo(0, 0))
+    await page.waitForTimeout(650)
+    await expect.poll(() => page.getByAltText('待解析的二维码原图').evaluate((element) => {
+      const image = element as HTMLImageElement
+      return image.complete && image.naturalWidth > 0
+    })).toBe(true)
+    await expect.poll(async () => {
+      const image = PNG.sync.read(await page.getByAltText('待解析的二维码原图').screenshot())
+      let dark = 0
+      for (let index = 0; index < image.data.length; index += 4) {
+        if (image.data[index]! < 80 && image.data[index + 1]! < 80 && image.data[index + 2]! < 80) dark += 1
+      }
+      return dark / (image.width * image.height)
+    }).toBeGreaterThan(0.01)
+    await page.screenshot({ path: `test-results/v7.3-decode-${width}.png` })
+  }
+  await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1320, 900))
+})
+
+test('standalone decode preserves more than 2000 characters and whitespace without encoding constraints', async () => {
+  const beforeHistory = await page.evaluate(() => window.qrTool.getHistory())
+  const beforeFiles = await outputSnapshot()
+  const long = '1234567890'.repeat(300)
+  const longImage = path.join(dataRoot, 'standalone-long.png')
+  await writeFile(longImage, await QRCode.toBuffer(long, { width: 1024, margin: 8, errorCorrectionLevel: 'L' }))
+  for (const [source, content] of [[longImage, long], [path.join(decodeFixtures, 'capacity.png'), '汉'.repeat(950)]]) {
+    await chooseAndDecode(source!, [content!])
+    await page.getByRole('button', { name: '复制二维码 1 内容', exact: true }).click()
+    expect(await electronApp.evaluate(({ clipboard }) => clipboard.readText())).toBe(content)
+  }
+  const spaces = '  \n  '
+  const whitespaceImage = path.join(dataRoot, 'standalone-whitespace.png')
+  await writeFile(whitespaceImage, await QRCode.toBuffer(spaces, { width: 320, margin: 4 }))
+  await chooseAndDecode(whitespaceImage, [spaces])
+  await page.getByRole('button', { name: '复制二维码 1 内容', exact: true }).click()
+  expect(await electronApp.evaluate(({ clipboard }) => clipboard.readText())).toBe(spaces)
+  expect(await page.evaluate(() => window.qrTool.getHistory())).toEqual(beforeHistory)
+  expect(await outputSnapshot()).toEqual(beforeFiles)
+})
+
+test('standalone decode clears stale results on failure and retries the same repaired image', async () => {
+  const before = await page.evaluate(() => window.qrTool.getHistory())
+  for (const [file, message] of [['no-qr.png', '未识别到二维码'], ['corrupt.png', '图片无法读取'],
+    ['too-wide.png', '图片过大'], ['too-many-pixels.png', '图片过大']]) {
+    await overrideOpenDialog(path.join(decodeFixtures, file!))
+    await page.getByRole('button', { name: '选择二维码图片', exact: true }).click()
+    await expect(page.locator('.decode-task .status-pill.error')).toContainText(message!)
+    await expect(page.locator('.decode-task .decode-output')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '重试此图片' })).toBeEnabled()
+  }
+  const tooLarge = path.join(dataRoot, 'standalone-oversized.png')
+  await writeFile(tooLarge, '')
+  await truncate(tooLarge, 32 * 1024 * 1024 + 1)
+  await overrideOpenDialog(tooLarge)
+  await page.getByRole('button', { name: '选择二维码图片', exact: true }).click()
+  await expect(page.locator('.decode-task .status-pill.error')).toContainText('32 MiB')
+  await expect(page.getByRole('button', { name: '重试此图片' })).toHaveCount(0)
+
+  const repaired = path.join(dataRoot, 'standalone-repair.png')
+  await writeFile(repaired, await readFile(path.join(decodeFixtures, 'no-qr.png')))
+  await overrideOpenDialog(repaired)
+  await page.getByRole('button', { name: '选择二维码图片', exact: true }).click()
+  await expect(page.locator('.decode-task .status-pill.error')).toContainText('未识别到二维码')
+  await writeFile(repaired, await readFile(path.join(decodeFixtures, 'base.png')))
+  await page.getByRole('button', { name: '重试此图片' }).click()
+  await expect(page.locator('.decode-task .status-pill.success')).toContainText('解析完成')
+  expect(await page.locator('.decode-task .decode-output').textContent()).toBe(decodeContent)
+  expect(await page.evaluate(() => window.qrTool.getHistory())).toEqual(before)
+})
+
+test('standalone decode validates IPC input and always releases its main-process guard', async () => {
+  const errors = await page.evaluate(async (source) => {
+    const inputs = [null, {}, { operationId: 'bad-path', path: '' }, { operationId: 'no-png', path: source },
+      { operationId: 'corrupt-png', path: source, normalizedPng: new Uint8Array(64) }]
+    const messages: string[] = []
+    for (const input of inputs) {
+      try { await window.qrTool.decode(input as Parameters<typeof window.qrTool.decode>[0]); messages.push('unexpected success') }
+      catch (error) { messages.push(error instanceof Error ? error.message : String(error)) }
+    }
+    return messages
+  }, path.join(decodeFixtures, 'base.png'))
+  expect(errors.slice(0, 3).every((message) => message.includes('请求参数不完整'))).toBe(true)
+  expect(errors.slice(3).every((message) => /无效|损坏|PNG/.test(message))).toBe(true)
+  await chooseAndDecode(path.join(decodeFixtures, 'base.png'), [decodeContent])
+})
+
+test('standalone decode recovers from a component error and isolates progress during real file drops and workspace changes', async () => {
+  await page.getByRole('tab', { name: '二维码解析', exact: true }).click()
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  const beforeFiles = await outputSnapshot()
+  await electronApp.evaluate(({ ipcMain }) => {
+    type Handler = (event: Electron.IpcMainInvokeEvent, request: unknown) => unknown
+    const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, Handler> })._invokeHandlers
+    const original = handlers.get('qr:decode')
+    if (!original) throw new Error('Decode handler unavailable')
+    const state = globalThis as typeof globalThis & { originalDecode?: Handler; decodeCalls?: number }
+    state.originalDecode = original
+    state.decodeCalls = 0
+    ipcMain.removeHandler('qr:decode')
+    ipcMain.handle('qr:decode', async (event, request) => {
+      state.decodeCalls = (state.decodeCalls ?? 0) + 1
+      if (state.decodeCalls === 1) throw new Error('本地解析组件加载失败，请重试。图片未上传。')
+      await new Promise((resolve) => setTimeout(resolve, 2500))
+      return original(event, request)
+    })
+  })
+  const session = await page.context().newCDPSession(page)
+  await setMainNetworkBlocked(true)
+  await page.context().route(/^https?:\/\//, (route) => route.abort())
+  try {
+    await overrideOpenDialog(path.join(decodeFixtures, 'sample.webp'))
+    await page.getByRole('button', { name: '选择二维码图片', exact: true }).click()
+    await expect(page.locator('.decode-task .status-pill.error')).toContainText('本地解析组件加载失败')
+    const box = await page.locator('.image-drop-zone').boundingBox()
+    if (!box) throw new Error('Drop zone unavailable')
+    const drag = { x: box.x + 40, y: box.y + 40, data: { items: [], files: [path.join(decodeFixtures, 'sample.webp')], dragOperationsMask: 1 } }
+    await session.send('Input.dispatchDragEvent', { type: 'dragEnter', ...drag })
+    await session.send('Input.dispatchDragEvent', { type: 'dragOver', ...drag })
+    await session.send('Input.dispatchDragEvent', { type: 'drop', ...drag })
+    await expect(page.getByRole('button', { name: '正在解析…', exact: true })).toBeDisabled()
+    await expect(page.locator('.decode-loading-orbit')).toHaveCSS('animation-name', 'decode-spin')
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    expect(await page.locator('.decode-loading-orbit').evaluate((element) => parseFloat(getComputedStyle(element).animationDuration))).toBeLessThan(0.01)
+    await session.send('Input.dispatchDragEvent', { type: 'dragEnter', ...drag })
+    await session.send('Input.dispatchDragEvent', { type: 'drop', ...drag })
+    await page.getByRole('tab', { name: '文本生成' }).click()
+    await page.evaluate(() => window.qrTool.updateSettings({ qr: { engine: 'local', size: 512, errorCorrection: 'M', border: 2 } }))
+    await page.locator('textarea.content-input').fill('解析期间独立生成')
+    await page.getByRole('button', { name: '生成二维码', exact: true }).click()
+    await expect(page.getByAltText('生成的二维码')).toBeVisible()
+    await page.waitForTimeout(2600)
+    await expect(page.getByRole('tab', { name: '文本生成' })).toHaveAttribute('aria-selected', 'true')
+    await page.getByRole('tab', { name: '二维码解析', exact: true }).click()
+    await expect(page.locator('.decode-task .status-pill.success')).toContainText('解析完成')
+    expect(await page.locator('.decode-task .decode-output').textContent()).toBe(decodeContent)
+    expect(await electronApp.evaluate(() => (globalThis as typeof globalThis & { decodeCalls?: number }).decodeCalls)).toBe(2)
+    expect(await outputSnapshot()).toEqual(beforeFiles)
+    expect(await mainNetworkAttempts()).toEqual([])
+  } finally {
+    await session.detach()
+    await page.emulateMedia({ reducedMotion: null })
+    await setMainNetworkBlocked(false)
+    await page.context().unroute(/^https?:\/\//)
+    await electronApp.evaluate(({ ipcMain }) => {
+      type Handler = (event: Electron.IpcMainInvokeEvent, request: unknown) => unknown
+      const state = globalThis as typeof globalThis & { originalDecode?: Handler }
+      if (state.originalDecode) { ipcMain.removeHandler('qr:decode'); ipcMain.handle('qr:decode', state.originalDecode) }
+    })
+  }
+  expect(rendererErrors).toEqual([])
 })

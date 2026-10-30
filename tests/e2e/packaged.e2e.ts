@@ -33,7 +33,8 @@ test('the packaged Windows app decodes, rebuilds, saves and generates offline', 
     })
     await electronApp.evaluate(({ app, dialog }, paths) => {
       if (!app.isPackaged) throw new Error('当前启动的不是打包产物')
-      if (app.getVersion() !== '7.2.0') throw new Error(`打包版本不正确：${app.getVersion()}`)
+      if (process.versions.electron !== '44.9.1') throw new Error(`Electron 安全修复版本不正确：${process.versions.electron}`)
+      if (app.getVersion() !== '7.3.0') throw new Error(`打包版本不正确：${app.getVersion()}`)
       const state = globalThis as typeof globalThis & { qrPackagedNetworkAttempts?: string[] }
       state.qrPackagedNetworkAttempts = []
       globalThis.fetch = (async (input) => {
@@ -49,6 +50,21 @@ test('the packaged Windows app decodes, rebuilds, saves and generates offline', 
     page.on('pageerror', (error) => errors.push(error.message))
     await page.waitForSelector('.app-shell')
     const sourceContent = '  易码本地解析 🧪\nhttps://example.com/offline\n  '
+    await page.evaluate(() => window.qrTool.updateSettings({ qr: { engine: 'caoliao', size: 128, errorCorrection: 'H', border: 16 } }))
+    await page.getByRole('tab', { name: '二维码解析', exact: true }).click()
+    await page.getByRole('button', { name: '选择二维码图片', exact: true }).click()
+    await expect(page.locator('.decode-task .status-pill.success')).toContainText('解析完成')
+    expect(await page.locator('.decode-task .decode-output').textContent()).toBe(sourceContent)
+    await page.getByRole('button', { name: '复制二维码 1 内容', exact: true }).click()
+    expect(await electronApp.evaluate(({ clipboard }) => clipboard.readText())).toBe(sourceContent)
+    await expect(page.getByRole('button', { name: '检测接口', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '下载二维码', exact: true })).toHaveCount(0)
+    expect(await page.evaluate(() => window.qrTool.getHistory())).toEqual([])
+    expect(await stat(rebuiltFile).then(() => true, () => false)).toBe(false)
+    await expect(page.getByAltText('待解析的二维码原图')).toBeVisible()
+    await page.screenshot({ path: 'test-results/v7.3-packaged-decode.png' })
+    await page.evaluate(() => window.qrTool.updateSettings({ qr: { engine: 'local', size: 1024, errorCorrection: 'M', border: 2 } }))
+    await page.getByRole('tab', { name: '图片重构' }).click()
     await page.getByRole('button', { name: '选择二维码图片', exact: true }).click()
     await expect(page.locator('.status-pill.success')).toContainText('重构完成')
     expect(await page.locator('.decode-output').textContent()).toBe(sourceContent)

@@ -1,6 +1,6 @@
 {
   "name": "ezqr-tools",
-  "version": "7.2.0",
+  "version": "7.3.0",
   "description": "易码 EzQR-Tools - 轻盈、清晰的二维码解析与生成工具",
   "main": "./out/main/index.js",
   "author": "W3F7 <W3F7-1203019025@qq.com>",
@@ -42,7 +42,7 @@
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
     "@vitejs/plugin-react": "6.1.2",
-    "electron": "44.9.0",
+    "electron": "44.9.1",
     "electron-builder": "26.15.3",
     "electron-vite": "6.0.0",
     "eslint": "9.39.5",

@@ -1,4 +1,4 @@
-export type WorkspaceId = 'rebuild' | 'generate'
+export type WorkspaceId = 'rebuild' | 'generate' | 'decode'
 
 export type PaletteName = 'mistBlue' | 'sakuraPink' | 'mintGreen'
 export type ErrorCorrection = 'L' | 'M' | 'Q' | 'H'
@@ -130,6 +130,18 @@ export interface RebuildResult {
   rebuiltPreviewUrl: string
 }
 
+export interface DecodeResult {
+  contents: string[]
+  sourcePath: string
+  sourcePreviewUrl: string
+}
+
+export interface DecodeRequest {
+  operationId: string
+  path: string
+  normalizedPng: Uint8Array
+}
+
 export interface GenerateResult {
   info: string
   previewUrl: string
@@ -151,7 +163,7 @@ export interface TextImportResult {
 
 export interface OperationProgress {
   operationId: string
-  kind: 'rebuild' | 'generate' | 'api' | 'save'
+  kind: 'rebuild' | 'generate' | 'decode' | 'api' | 'save'
   message: string
 }
 
@@ -197,6 +209,7 @@ export interface QrToolApi {
   chooseImage(): Promise<MediaSelection | null>
   prepareDroppedImage(path: string): Promise<MediaSelection>
   rebuild(request: RebuildRequest): Promise<RebuildResult>
+  decode(request: DecodeRequest): Promise<DecodeResult>
   generate(request: GenerateRequest): Promise<GenerateResult>
   saveQr(operationId: string): Promise<SaveQrResult | null>
   chooseTextFile(): Promise<TextImportResult | null>

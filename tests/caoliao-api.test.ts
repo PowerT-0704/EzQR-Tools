@@ -82,14 +82,14 @@ describe('CaoliaoApi', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('preserves leading and trailing whitespace and uses the v7.2 client identity', async () => {
+  it('preserves leading and trailing whitespace and uses the v7.3 client identity', async () => {
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
     const fetchMock = vi.fn().mockResolvedValue(new Response(png))
     vi.stubGlobal('fetch', fetchMock)
     await new CaoliaoApi(config).generateQr('  original\n ', { size: 1024, errorCorrection: 'M', border: 2 })
     const url = new URL(String(fetchMock.mock.calls[0]?.[0]))
     expect(url.searchParams.get('data')).toBe('  original\n ')
-    expect(fetchMock.mock.calls[0]?.[1]?.headers['User-Agent']).toBe('EzQR-Tools/7.2.0')
+    expect(fetchMock.mock.calls[0]?.[1]?.headers['User-Agent']).toBe('EzQR-Tools/7.3.0')
   })
 
   it('decodes supplied bytes without requiring a file path', async () => {

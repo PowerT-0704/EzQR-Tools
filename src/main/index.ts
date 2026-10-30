@@ -25,6 +25,8 @@ import type {
   ApiStatus,
   AppSettingsView,
   BootstrapData,
+  DecodeRequest,
+  DecodeResult,
   DataRootChange,
   GenerateRequest,
   GenerateResult,
@@ -48,6 +50,7 @@ import { validateExternalUrl } from './services/external-links'
 import { HistoryStore } from './services/history-store'
 import { MediaStore } from './services/media-store'
 import { LocalQrEngine } from './services/local-qr-engine'
+import { LocalDecodeEngine } from './services/local-decode-engine'
 import { validateQrSource } from './services/image-input'
 import type { QrCodeEngine } from './services/qr-code-engine'
 import { validateQrSettings } from './services/qr-code-engine'
@@ -86,6 +89,7 @@ let historyStore: HistoryStore
 let announcementStore: AnnouncementStore
 const mediaStore = new MediaStore()
 let busyRebuild = false
+let busyDecode = false
 let busyGenerate = false
 let busyApiCheck = false
 let lastGeneratedBytes: Buffer | null = null
@@ -134,7 +138,7 @@ function notifyHistory(): void {
 
 function backgroundImageUrl(): string {
   const imagePath = configStore.get().appearance.backgroundImage
-  return imagePath ? mediaStore.addFile(imagePath) : ''
+  return imagePath ? mediaStore.addFile(imagePath, 'background') : ''
 }
 
 function settingsView(): AppSettingsView {
@@ -149,7 +153,7 @@ function windowState(): WindowState {
   return { maximized: Boolean(mainWindow?.isMaximized()) }
 }
 
-async function prepareImage(filePath: string, qrSource = true): Promise<MediaSelection> {
+async function prepareImage(filePath: string, qrSource = true, preview?: 'decode-source' | 'rebuild-source'): Promise<MediaSelection> {
   const resolved = resolve(filePath)
   if (!IMAGE_EXTENSIONS.includes(extname(resolved).toLowerCase() as (typeof IMAGE_EXTENSIONS)[number])) {
     throw new AppError('IMAGE_TYPE', '不支持的图片格式，请选择 PNG / JPG / BMP / GIF / WebP')
@@ -160,8 +164,29 @@ async function prepareImage(filePath: string, qrSource = true): Promise<MediaSel
   if (qrSource) await validateQrSource(resolved)
   return {
     path: resolved,
-    previewUrl: mediaStore.addFile(resolved),
+    previewUrl: mediaStore.addFile(resolved, preview),
     name: resolved.split(/[\\/]/).pop() || resolved
+  }
+}
+
+async function decode(request: DecodeRequest): Promise<DecodeResult> {
+  if (busyDecode) throw new AppError('BUSY', '已有二维码解析任务正在进行')
+  if (!request || typeof request.operationId !== 'string' || !request.operationId.trim() ||
+      typeof request.path !== 'string' || !request.path.trim()) {
+    throw new AppError('INVALID_REQUEST', '请求参数不完整')
+  }
+  busyDecode = true
+  try {
+    const source = await prepareImage(request.path, true, 'decode-source')
+    sendProgress(request.operationId, 'decode', '正在本地解析二维码…')
+    // This path deliberately has no engine settings, encoder, output or history calls.
+    const contents = await new LocalDecodeEngine().decode({ bytes: request.normalizedPng, name: source.name })
+    if (!contents.length) {
+      throw new AppError('QR_NOT_FOUND', '未识别到二维码，请确认图片中包含完整清晰的二维码')
+    }
+    return { contents, sourcePath: source.path, sourcePreviewUrl: source.previewUrl }
+  } finally {
+    busyDecode = false
   }
 }
 
@@ -182,7 +207,7 @@ async function rebuild(request: RebuildRequest): Promise<RebuildResult> {
     const config = configStore.get()
     const qr = validateQrSettings(request.qr === undefined ? config.qr : request.qr)
     const engine = processingEngine(qr, config.api)
-    const source = await prepareImage(request.path)
+    const source = await prepareImage(request.path, true, 'rebuild-source')
     sendProgress(request.operationId, 'rebuild', qr.engine === 'local' ? '正在本地解析二维码…' : '正在上传并解析二维码…')
     let sourceBytes: Uint8Array
     if (qr.engine === 'local') {
@@ -229,7 +254,7 @@ async function rebuild(request: RebuildRequest): Promise<RebuildResult> {
       sourcePath: source.path,
       savedPath: target,
       sourcePreviewUrl: source.previewUrl,
-      rebuiltPreviewUrl: mediaStore.addBuffer(bytes)
+      rebuiltPreviewUrl: mediaStore.addBuffer(bytes, 'image/png', 'rebuilt')
     }
   } finally {
     busyRebuild = false
@@ -270,7 +295,7 @@ async function generate(request: GenerateRequest): Promise<GenerateResult> {
     sendProgress(request.operationId, 'generate', '生成完成')
     return {
       info: `${qr.engine === 'local' ? '本地生成' : '草料在线生成'} · 内容长度 ${content.length} 字符 · 图片大小 ${(bytes.byteLength / 1024).toFixed(1)} KB`,
-      previewUrl: mediaStore.addBuffer(bytes),
+      previewUrl: mediaStore.addBuffer(bytes, 'image/png', 'generated'),
       recordId: record.id
     }
   } finally {
@@ -438,6 +463,7 @@ function registerIpc(): void {
     prepareImage(String(filePath ?? ''))
   )
   ipcMain.handle(IPC.rebuild, (_event, request: RebuildRequest) => rebuild(request))
+  ipcMain.handle(IPC.decode, (_event, request: DecodeRequest) => decode(request))
   ipcMain.handle(IPC.generate, (_event, request: GenerateRequest) => generate(request))
   ipcMain.handle(IPC.saveQr, (_event, operationId: unknown) => saveQr(String(operationId ?? '')))
   ipcMain.handle(IPC.chooseTextFile, () => importTextWithLimits())

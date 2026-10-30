@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import QRCode from 'qrcode'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LocalDecodeEngine } from '../src/main/services/local-decode-engine'
 import { LocalQrEngine } from '../src/main/services/local-qr-engine'
@@ -11,6 +12,10 @@ const options = { size: 1024, errorCorrection: 'M' as const, border: 2 }
 afterEach(() => vi.unstubAllGlobals())
 
 describe('LocalDecodeEngine with the packaged reader WASM', () => {
+  it.each(['1234567890'.repeat(300), '  \n  '])('decodes raw content without generation validation or truncation (%#)', async (text) => {
+    const bytes = await QRCode.toBuffer(text, { width: 1024, margin: 8, errorCorrectionLevel: 'L' })
+    expect(await new LocalDecodeEngine().decode({ bytes, name: 'decode-only.png' })).toEqual([text])
+  })
   it.each([
     ['中文', '你好，易码二维码'],
     ['URL', 'https://example.com/?a=1&b=%E4%B8%AD'],

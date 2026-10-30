@@ -3,6 +3,7 @@ export const IPC = {
   chooseImage: 'dialog:choose-image',
   prepareDroppedImage: 'dialog:prepare-dropped-image',
   rebuild: 'qr:rebuild',
+  decode: 'qr:decode',
   generate: 'qr:generate',
   saveQr: 'qr:save',
   chooseTextFile: 'dialog:choose-text-file',
