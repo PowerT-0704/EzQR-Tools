@@ -1,10 +1,13 @@
 import { Plasma } from '@cruxgarden/plasma-ui'
-import type { QrSettings, RebuildResult } from '../../../shared/types'
+import type { QrExportFormat, QrSettings, RebuildResult } from '../../../shared/types'
+import { QrFormatSelect } from '../components/QrFormatSelect'
 import { truncateContent, truncateMiddle } from '../../../shared/format'
 import type { UiStatus } from '../types'
 
 interface RebuildPageProps {
   qrEngine: QrSettings['engine']
+  format: QrExportFormat
+  onFormatChange: (format: QrExportFormat) => void
   busy: boolean
   status: UiStatus
   result: RebuildResult | null
@@ -16,6 +19,8 @@ interface RebuildPageProps {
 
 export function RebuildPage({
   qrEngine,
+  format,
+  onFormatChange,
   busy,
   status,
   result,
@@ -40,6 +45,7 @@ export function RebuildPage({
           <span className={`status-pill ${status.kind}`}>{status.message}</span>
         </header>
 
+        <QrFormatSelect engine={qrEngine} format={format} disabled={busy} onChange={onFormatChange} />
         <div className={`image-drop-zone ${busy ? 'busy' : ''}`}>
           <div className="drop-icon" aria-hidden="true">
             <span />
@@ -114,6 +120,7 @@ export function RebuildPage({
               <button
                 type="button"
                 className="secondary-button"
+                disabled={busy}
                 onClick={onChoose}
               >
                 重新选择

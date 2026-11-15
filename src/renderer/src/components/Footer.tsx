@@ -5,7 +5,7 @@ import { formatClock } from '../../../shared/format'
 import { GlassButton } from './GlassControls'
 
 interface FooterProps {
-  decodeOnly: boolean
+  localTask: 'decode' | 'convert' | null
   appVersion: string
   authorEmail: string
   apiStatus: ApiStatus
@@ -16,7 +16,7 @@ interface FooterProps {
 }
 
 export function Footer({
-  decodeOnly,
+  localTask,
   appVersion,
   authorEmail,
   apiStatus,
@@ -43,10 +43,10 @@ export function Footer({
     >
       <div className="footer-api">
         <span className="footer-engine">
-          <span className={`status-dot ${decodeOnly || qrEngine === 'local' ? 'ok' : ''}`} />
-          {decodeOnly ? '本地解析 · 离线' : qrEngine === 'local' ? '本地处理 · 可离线' : '草料在线处理'}
+          <span className={`status-dot ${localTask || qrEngine === 'local' ? 'ok' : ''}`} />
+          {localTask === 'convert' ? '本地转换 · 离线' : localTask === 'decode' ? '本地解析 · 离线' : qrEngine === 'local' ? '本地处理 · 可离线' : '草料在线处理'}
         </span>
-        {!decodeOnly && (
+        {!localTask && (
           <>
             <span className="footer-online-label">在线接口</span>
             <span

@@ -851,6 +851,67 @@ textarea:focus-visible {
   gap: 14px;
 }
 
+.export-format {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 14px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.text-card .export-format {
+  margin: 0 0 12px;
+}
+
+.export-format label {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.export-format select {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 6px 10px;
+  background: rgb(255 255 255 / 68%);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.export-format + .image-drop-zone {
+  margin-top: 13px;
+}
+
+.conversion-task {
+  overflow-y: auto;
+}
+
+.conversion-task .task-card {
+  flex: none;
+}
+
+.conversion-task .drop-wording {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.conversion-task .image-drop-zone {
+  flex-wrap: wrap;
+  min-height: 112px;
+}
+
+.conversion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 15px;
+}
+
 .toolbar-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1016,6 +1077,10 @@ textarea:focus-visible {
 .preview-canvas.has-image {
   background: #ffffff;
   animation: qr-arrive 360ms cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+
+.preview-canvas.has-image.alpha-preview {
+  background: #fff conic-gradient(#ebeff3 25%, #fff 0 50%, #ebeff3 0 75%, #fff 0) 0 0 / 20px 20px;
 }
 
 .preview-canvas img {
@@ -2566,6 +2631,10 @@ textarea:focus-visible {
 
   .task-card {
     padding: 22px 23px;
+  }
+
+  .content-input {
+    min-height: 132px;
   }
 
   .preview-dock,

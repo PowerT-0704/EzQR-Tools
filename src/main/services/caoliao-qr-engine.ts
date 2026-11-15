@@ -1,7 +1,7 @@
-import type { ApiConfig, QrOptions } from '../../shared/types'
+import type { ApiConfig, QrExportFormat, QrOptions } from '../../shared/types'
 import { CaoliaoApi } from './caoliao-api'
 import type { EngineHealth, ImageBytes, QrCodeEngine } from './qr-code-engine'
-import { validateQrOptions } from './qr-code-engine'
+import { validateExportFormat, validateQrOptions } from './qr-code-engine'
 
 export class CaoliaoQrEngine implements QrCodeEngine {
   readonly id = 'caoliao' as const
@@ -12,7 +12,8 @@ export class CaoliaoQrEngine implements QrCodeEngine {
     this.api = new CaoliaoApi(config)
   }
 
-  encode(content: string, options: QrOptions): Promise<Buffer> {
+  async encode(content: string, options: QrOptions, format: QrExportFormat = 'png'): Promise<Buffer> {
+    validateExportFormat(format, this.id)
     return this.api.generateQr(content, validateQrOptions(options))
   }
 

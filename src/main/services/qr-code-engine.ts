@@ -1,4 +1,4 @@
-import type { QrEngineId, QrOptions, QrSettings } from '../../shared/types'
+import type { QrEngineId, QrExportFormat, QrOptions, QrSettings } from '../../shared/types'
 import { AppError } from './errors'
 
 export interface ImageBytes {
@@ -15,7 +15,7 @@ export interface EngineHealth {
 export interface QrCodeEngine {
   readonly id: QrEngineId
   readonly supportsDecode: boolean
-  encode(content: string, options: QrOptions): Promise<Buffer>
+  encode(content: string, options: QrOptions, format?: QrExportFormat): Promise<Buffer>
   decode(image: ImageBytes): Promise<string[]>
   health(): Promise<EngineHealth>
 }
@@ -61,4 +61,15 @@ export function validateQrSettings(raw: unknown): QrSettings {
     throw new AppError('INVALID_QR_OPTIONS', '请选择本地处理或草料在线处理引擎')
   }
   return { ...options, engine }
+}
+
+export function validateExportFormat(raw: unknown, engine: QrEngineId): QrExportFormat {
+  const format = raw === undefined ? 'png' : raw
+  if (format !== 'png' && format !== 'transparent-png' && format !== 'svg') {
+    throw new AppError('INVALID_FORMAT', '请选择白底 PNG、透明 PNG 或 SVG')
+  }
+  if (engine === 'caoliao' && format !== 'png') {
+    throw new AppError('LOCAL_FORMAT_ONLY', '透明 PNG 和 SVG 需要先切换到本地处理引擎')
+  }
+  return format
 }

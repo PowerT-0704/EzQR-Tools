@@ -10,7 +10,8 @@ interface MediaEntry {
   createdAt: number
 }
 
-type PreviewSlot = 'background' | 'generated' | 'rebuilt' | 'rebuild-source' | 'decode-source'
+export type PreviewSlot = 'background' | 'generated' | 'rebuilt' | 'rebuild-source' | 'decode-source' |
+  'convert-source' | 'convert-result'
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   '.png': 'image/png',

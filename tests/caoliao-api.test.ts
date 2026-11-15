@@ -89,7 +89,7 @@ describe('CaoliaoApi', () => {
     await new CaoliaoApi(config).generateQr('  original\n ', { size: 1024, errorCorrection: 'M', border: 2 })
     const url = new URL(String(fetchMock.mock.calls[0]?.[0]))
     expect(url.searchParams.get('data')).toBe('  original\n ')
-    expect(fetchMock.mock.calls[0]?.[1]?.headers['User-Agent']).toBe('EzQR-Tools/7.3.0')
+    expect(fetchMock.mock.calls[0]?.[1]?.headers['User-Agent']).toBe('EzQR-Tools/7.4.0')
   })
 
   it('decodes supplied bytes without requiring a file path', async () => {

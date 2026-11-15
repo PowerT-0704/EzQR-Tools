@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Plasma } from '@cruxgarden/plasma-ui'
+import { QR_FORMATS } from '../../../shared/qr-formats'
 import type { GenerateResult, MediaSelection, RebuildResult, WorkspaceId } from '../../../shared/types'
 
 interface PreviewDockProps {
@@ -8,6 +9,7 @@ interface PreviewDockProps {
   rebuildResult: RebuildResult | null
   generateResult: GenerateResult | null
   lastSavedPath: string
+  saveDisabled: boolean
   onOpenImage: (path: string) => void
   onOpenFolder: (kind: 'rebuilt' | 'generated') => void
   onSave: () => void
@@ -19,6 +21,7 @@ export function PreviewDock({
   rebuildResult,
   generateResult,
   lastSavedPath,
+  saveDisabled,
   onOpenImage,
   onOpenFolder,
   onSave
@@ -57,6 +60,9 @@ export function PreviewDock({
 
   const hasRebuild = workspace === 'rebuild' && rebuildResult !== null
   const hasGenerate = workspace === 'generate' && generateResult !== null
+  const format = hasRebuild && imageView === 'rebuilt'
+    ? rebuildResult.format
+    : hasGenerate ? generateResult.format : undefined
   const previewUrl = hasRebuild
     ? imageView === 'source'
       ? rebuildResult.sourcePreviewUrl
@@ -79,7 +85,7 @@ export function PreviewDock({
           <h2>二维码预览</h2>
         </div>
         <span className={`dock-state ${previewUrl ? 'ready' : ''}`}>
-          {previewUrl ? '已就绪' : '等待生成'}
+          {format ? QR_FORMATS[format].label : previewUrl ? '已就绪' : '等待生成'}
         </span>
       </header>
 
@@ -107,7 +113,7 @@ export function PreviewDock({
         </div>
       )}
 
-      <div className={`preview-canvas ${previewUrl ? 'has-image' : ''}`}>
+      <div className={`preview-canvas ${previewUrl ? 'has-image' : ''} ${format && format !== 'png' ? 'alpha-preview' : ''}`}>
         {previewUrl ? (
           <img src={previewUrl} alt={hasRebuild ? '二维码重构预览' : '生成的二维码'} />
         ) : (
@@ -170,7 +176,7 @@ export function PreviewDock({
           </>
         ) : hasGenerate ? (
           <>
-            <button type="button" className="primary-button" onClick={onSave}>
+            <button type="button" className="primary-button" disabled={saveDisabled} onClick={onSave}>
               下载二维码
             </button>
             <button

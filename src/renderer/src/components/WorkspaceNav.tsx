@@ -43,6 +43,16 @@ const ITEMS: Array<{
         <path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M7 12h10M9 8h6M9 16h6" />
       </svg>
     )
+  },
+  {
+    id: 'convert',
+    label: '透明与矢量',
+    description: 'PNG 去白底与 SVG',
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 4h10v10H4zM10 17v3h10V10h-3M4 9h10M9 4v10" />
+      </svg>
+    )
   }
 ]
 

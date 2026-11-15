@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { createDefaultConfig } from '../src/main/services/config-store'
-import { buildRebuildPath, savePng } from '../src/main/services/qr-output'
+import { buildRebuildPath, saveQrFile } from '../src/main/services/qr-output'
 
 const directories: string[] = []
 
@@ -48,8 +48,23 @@ describe('QR output paths', () => {
 
   it('adds a PNG suffix and writes binary data', async () => {
     const directory = await temporaryDirectory()
-    const target = await savePng(path.join(directory, 'QRCode'), Buffer.from([1, 2, 3]))
+    const target = await saveQrFile(path.join(directory, 'QRCode'), Buffer.from([1, 2, 3]), 'png')
     expect(target.endsWith('.png')).toBe(true)
+  })
+
+  it('numbers new format rebuilds and rejects mismatched extensions', async () => {
+    const directory = await temporaryDirectory()
+    const source = path.join(directory, 'sample.png')
+    const config = createDefaultConfig()
+    const svg = await buildRebuildPath(source, config, 'svg')
+    expect(svg).toBe(path.join(directory, 'sample_rebuild.svg'))
+    await saveQrFile(svg, Buffer.from('<svg/>'), 'svg')
+    expect(await buildRebuildPath(source, config, 'svg')).toBe(path.join(directory, 'sample_rebuild_1.svg'))
+    expect(await buildRebuildPath(source, config, 'transparent-png')).toBe(path.join(directory, 'sample_rebuild_transparent.png'))
+    await expect(saveQrFile(path.join(directory, 'QRCode.png'), Buffer.from('<svg/>'), 'svg'))
+      .rejects.toMatchObject({ code: 'INVALID_FORMAT' })
+    await expect(saveQrFile(path.join(directory, 'sample'), Buffer.alloc(1), 'transparent-png', source))
+      .rejects.toMatchObject({ code: 'SAVE_FAILED' })
   })
 })
 

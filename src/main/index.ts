@@ -1,4 +1,5 @@
-import { dirname, extname, join, resolve } from 'node:path'
+import { basename, dirname, extname, join, parse, resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { access, readFile } from 'node:fs/promises'
 import {
@@ -20,11 +21,15 @@ import {
   UI_TEXT_LIMIT
 } from '../shared/constants'
 import { IPC } from '../shared/channels'
+import { QR_FORMATS } from '../shared/qr-formats'
 import type {
   ApiConfig,
   ApiStatus,
   AppSettingsView,
   BootstrapData,
+  ConversionRequest,
+  ConversionResult,
+  ConversionSource,
   DecodeRequest,
   DecodeResult,
   DataRootChange,
@@ -33,9 +38,11 @@ import type {
   HistoryRecord,
   MediaSelection,
   OperationProgress,
+  QrExportFormat,
   QrSettings,
   RebuildRequest,
   RebuildResult,
+  SaveQrRequest,
   SaveQrResult,
   SettingsPatch,
   TextImportResult,
@@ -48,17 +55,18 @@ import { ConfigStore } from './services/config-store'
 import { AppError, messageFromError } from './services/errors'
 import { validateExternalUrl } from './services/external-links'
 import { HistoryStore } from './services/history-store'
-import { MediaStore } from './services/media-store'
+import { MediaStore, type PreviewSlot } from './services/media-store'
 import { LocalQrEngine } from './services/local-qr-engine'
 import { LocalDecodeEngine } from './services/local-decode-engine'
 import { validateQrSource } from './services/image-input'
+import { convertPng } from './services/image-conversion'
 import type { QrCodeEngine } from './services/qr-code-engine'
-import { validateQrSettings } from './services/qr-code-engine'
+import { validateExportFormat, validateQrSettings } from './services/qr-code-engine'
 import {
   buildRebuildPath,
   customOutputDirectory,
   defaultDownloadDirectory,
-  savePng
+  saveQrFile
 } from './services/qr-output'
 import { extractText } from './services/text-import'
 import { checkForLatestRelease } from './services/update-service'
@@ -91,9 +99,17 @@ const mediaStore = new MediaStore()
 let busyRebuild = false
 let busyDecode = false
 let busyGenerate = false
+let busyConvert = false
+let busySave = false
 let busyApiCheck = false
-let lastGeneratedBytes: Buffer | null = null
-let lastGeneratedRecordId: string | null = null
+interface ExportArtifact {
+  id: string
+  bytes: Buffer
+  format: QrExportFormat
+}
+let lastGenerated: ExportArtifact | null = null
+let conversionSource: ConversionSource | null = null
+let lastConverted: (ExportArtifact & { sourcePath: string }) | null = null
 let lastGeneratedSavedPath: string | null = null
 let lastRebuiltPath: string | null = null
 let apiStatus: ApiStatus = { ok: null, message: '草料解析：未检测', checkedAt: null }
@@ -153,7 +169,7 @@ function windowState(): WindowState {
   return { maximized: Boolean(mainWindow?.isMaximized()) }
 }
 
-async function prepareImage(filePath: string, qrSource = true, preview?: 'decode-source' | 'rebuild-source'): Promise<MediaSelection> {
+async function prepareImage(filePath: string, qrSource = true, preview?: PreviewSlot): Promise<MediaSelection> {
   const resolved = resolve(filePath)
   if (!IMAGE_EXTENSIONS.includes(extname(resolved).toLowerCase() as (typeof IMAGE_EXTENSIONS)[number])) {
     throw new AppError('IMAGE_TYPE', '不支持的图片格式，请选择 PNG / JPG / BMP / GIF / WebP')
@@ -165,7 +181,58 @@ async function prepareImage(filePath: string, qrSource = true, preview?: 'decode
   return {
     path: resolved,
     previewUrl: mediaStore.addFile(resolved, preview),
-    name: resolved.split(/[\\/]/).pop() || resolved
+    name: basename(resolved)
+  }
+}
+
+async function prepareConversionImage(filePath: unknown): Promise<ConversionSource> {
+  if (busyConvert || busySave) throw new AppError('BUSY', '请等待当前转换或保存完成')
+  if (typeof filePath !== 'string' || extname(filePath).toLowerCase() !== '.png') {
+    throw new AppError('IMAGE_TYPE', '请选择 PNG 图片')
+  }
+  const selection = await prepareImage(filePath, true, 'convert-source')
+  conversionSource = { ...selection, sourceId: randomUUID() }
+  lastConverted = null
+  return conversionSource
+}
+
+async function convertImage(request: ConversionRequest): Promise<ConversionResult> {
+  if (busyConvert || busySave) throw new AppError('BUSY', '请等待当前转换或保存完成')
+  if (!request || typeof request.operationId !== 'string' || !request.operationId.trim() ||
+      typeof request.sourceId !== 'string' ||
+      (request.mode !== 'remove-white' && request.mode !== 'trace-transparent' && request.mode !== 'white-to-svg')) {
+    throw new AppError('INVALID_REQUEST', '转换请求无效')
+  }
+  const source = conversionSource
+  const previous = lastConverted
+  const reuseTransparent = request.mode === 'trace-transparent' && previous?.format === 'transparent-png' &&
+    request.sourceId === previous.id
+  if (!source || !reuseTransparent && source.sourceId !== request.sourceId) {
+    throw new AppError('IMAGE_MISSING', '请重新选择要转换的 PNG 图片')
+  }
+  busyConvert = true
+  try {
+    sendProgress(request.operationId, 'convert', '正在本地转换 PNG…')
+    let bytes: Buffer
+    if (reuseTransparent) {
+      bytes = previous.bytes
+    } else {
+      await validateQrSource(source.path)
+      bytes = await readFile(source.path)
+      if (bytes.byteLength > MAX_QR_SOURCE_BYTES) {
+        throw new AppError('IMAGE_TOO_LARGE', '二维码源图片最多 32 MiB，请裁剪或缩小后重试')
+      }
+    }
+    const result = convertPng(bytes, request.mode)
+    const resultId = randomUUID()
+    lastConverted = { ...result, id: resultId, sourcePath: source.path }
+    return {
+      resultId,
+      format: result.format,
+      previewUrl: mediaStore.addBuffer(result.bytes, QR_FORMATS[result.format].mime, 'convert-result')
+    }
+  } finally {
+    busyConvert = false
   }
 }
 
@@ -206,6 +273,7 @@ async function rebuild(request: RebuildRequest): Promise<RebuildResult> {
     sendProgress(request.operationId, 'rebuild', '准备解析图片…')
     const config = configStore.get()
     const qr = validateQrSettings(request.qr === undefined ? config.qr : request.qr)
+    const format = validateExportFormat(request.format, qr.engine)
     const engine = processingEngine(qr, config.api)
     const source = await prepareImage(request.path, true, 'rebuild-source')
     sendProgress(request.operationId, 'rebuild', qr.engine === 'local' ? '正在本地解析二维码…' : '正在上传并解析二维码…')
@@ -236,11 +304,11 @@ async function rebuild(request: RebuildRequest): Promise<RebuildResult> {
       'rebuild',
       qr.engine === 'local' ? '解析成功，正在本地生成高清二维码…' : '解析成功，正在通过草料生成高清二维码…'
     )
-    const bytes = await engine.encode(content, qr)
+    const bytes = await engine.encode(content, qr, format)
     let target: string
     try {
-      target = await buildRebuildPath(source.path, config)
-      await savePng(target, bytes)
+      target = await buildRebuildPath(source.path, config, format)
+      await saveQrFile(target, bytes, format)
     } catch (error) {
       throw new AppError('SAVE_FAILED', `二维码已解析，但保存失败，请检查保存位置后重试：${messageFromError(error)}`)
     }
@@ -249,12 +317,13 @@ async function rebuild(request: RebuildRequest): Promise<RebuildResult> {
     notifyHistory()
     sendProgress(request.operationId, 'rebuild', '重构完成')
     return {
+      format,
       contents,
       content,
       sourcePath: source.path,
       savedPath: target,
       sourcePreviewUrl: source.previewUrl,
-      rebuiltPreviewUrl: mediaStore.addBuffer(bytes, 'image/png', 'rebuilt')
+      rebuiltPreviewUrl: mediaStore.addBuffer(bytes, QR_FORMATS[format].mime, 'rebuilt')
     }
   } finally {
     busyRebuild = false
@@ -280,22 +349,23 @@ async function generate(request: GenerateRequest): Promise<GenerateResult> {
   try {
     const config = configStore.get()
     const qr = validateQrSettings(request.qr === undefined ? config.qr : request.qr)
+    const format = validateExportFormat(request.format, qr.engine)
     const engine = processingEngine(qr, config.api)
     sendProgress(
       request.operationId,
       'generate',
       qr.engine === 'local' ? '正在本地生成二维码…' : '正在通过草料生成二维码…'
     )
-    const bytes = await engine.encode(content, qr)
+    const bytes = await engine.encode(content, qr, format)
     const record = await historyStore.add('generate', content)
-    lastGeneratedBytes = bytes
+    lastGenerated = { id: record.id, bytes, format }
     lastGeneratedSavedPath = null
-    lastGeneratedRecordId = record.id
     notifyHistory()
     sendProgress(request.operationId, 'generate', '生成完成')
     return {
+      format,
       info: `${qr.engine === 'local' ? '本地生成' : '草料在线生成'} · 内容长度 ${content.length} 字符 · 图片大小 ${(bytes.byteLength / 1024).toFixed(1)} KB`,
-      previewUrl: mediaStore.addBuffer(bytes, 'image/png', 'generated'),
+      previewUrl: mediaStore.addBuffer(bytes, QR_FORMATS[format].mime, 'generated'),
       recordId: record.id
     }
   } finally {
@@ -303,24 +373,41 @@ async function generate(request: GenerateRequest): Promise<GenerateResult> {
   }
 }
 
-async function saveQr(operationId: string): Promise<SaveQrResult | null> {
-  if (!lastGeneratedBytes) throw new AppError('NO_QR', '请先生成二维码')
-  const config = configStore.get()
-  const defaultDirectory = await defaultDownloadDirectory(config, lastGeneratedSavedPath)
-  const result = await dialog.showSaveDialog(rendererWindow(), {
-    title: '保存二维码',
-    defaultPath: join(defaultDirectory, 'QRCode.png'),
-    filters: [{ name: 'PNG 图片', extensions: ['png'] }]
-  })
-  if (result.canceled || !result.filePath) return null
-  sendProgress(operationId, 'save', '正在保存二维码…')
-  const savedPath = await savePng(result.filePath, lastGeneratedBytes)
-  lastGeneratedSavedPath = savedPath
-  if (lastGeneratedRecordId) {
-    await historyStore.updateSavedPath(lastGeneratedRecordId, savedPath)
-    notifyHistory()
+async function saveQr(request: SaveQrRequest): Promise<SaveQrResult | null> {
+  if (!request || typeof request.operationId !== 'string' || !request.operationId.trim() ||
+      typeof request.resultId !== 'string' || (request.kind !== 'generated' && request.kind !== 'converted')) {
+    throw new AppError('INVALID_REQUEST', '保存请求无效')
   }
-  return { savedPath }
+  if (busySave) throw new AppError('BUSY', '已有保存任务正在进行')
+  const converted = request.kind === 'converted' ? lastConverted : null
+  const artifact = request.kind === 'generated' ? lastGenerated : converted
+  if (!artifact || artifact.id !== request.resultId) {
+    throw new AppError('NO_QR', '当前结果已失效，请重新处理后保存')
+  }
+  busySave = true
+  try {
+    const config = configStore.get()
+    const format = QR_FORMATS[artifact.format]
+    const defaultDirectory = await defaultDownloadDirectory(config, converted?.sourcePath ?? lastGeneratedSavedPath)
+    const suffix = artifact.format === 'transparent-png' ? '_transparent' : '_vector'
+    const name = converted ? parse(converted.sourcePath).name + suffix : 'QRCode'
+    const result = await dialog.showSaveDialog(rendererWindow(), {
+      title: converted ? '保存转换结果' : '保存二维码',
+      defaultPath: join(defaultDirectory, name + '.' + format.extension),
+      filters: [{ name: format.label, extensions: [format.extension] }]
+    })
+    if (result.canceled || !result.filePath) return null
+    sendProgress(request.operationId, 'save', '正在保存二维码…')
+    const savedPath = await saveQrFile(result.filePath, artifact.bytes, artifact.format, converted?.sourcePath)
+    if (request.kind === 'generated') {
+      if (lastGenerated?.id === artifact.id) lastGeneratedSavedPath = savedPath
+      await historyStore.updateSavedPath(artifact.id, savedPath)
+      notifyHistory()
+    }
+    return { savedPath }
+  } finally {
+    busySave = false
+  }
 }
 
 async function importTextWithLimits(): Promise<TextImportResult | null> {
@@ -465,7 +552,17 @@ function registerIpc(): void {
   ipcMain.handle(IPC.rebuild, (_event, request: RebuildRequest) => rebuild(request))
   ipcMain.handle(IPC.decode, (_event, request: DecodeRequest) => decode(request))
   ipcMain.handle(IPC.generate, (_event, request: GenerateRequest) => generate(request))
-  ipcMain.handle(IPC.saveQr, (_event, operationId: unknown) => saveQr(String(operationId ?? '')))
+  ipcMain.handle(IPC.chooseConversionImage, async (): Promise<ConversionSource | null> => {
+    const result = await dialog.showOpenDialog(rendererWindow(), {
+      title: '选择要转换的 PNG',
+      properties: ['openFile'],
+      filters: [{ name: 'PNG 图片', extensions: ['png'] }]
+    })
+    return result.canceled || !result.filePaths[0] ? null : prepareConversionImage(result.filePaths[0])
+  })
+  ipcMain.handle(IPC.prepareConversionImage, (_event, path: unknown) => prepareConversionImage(path))
+  ipcMain.handle(IPC.convertImage, (_event, request: ConversionRequest) => convertImage(request))
+  ipcMain.handle(IPC.saveQr, (_event, request: SaveQrRequest) => saveQr(request))
   ipcMain.handle(IPC.chooseTextFile, () => importTextWithLimits())
   ipcMain.handle(IPC.getHistory, () => historyStore.get())
   ipcMain.handle(IPC.clearHistory, async (): Promise<HistoryRecord[]> => {

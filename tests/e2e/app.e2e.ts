@@ -6,6 +6,7 @@ import QRCode from 'qrcode'
 import jsQR from 'jsqr'
 import { PNG } from 'pngjs'
 import type { QrSettings } from '../../src/shared/types'
+import { expectTransparentQr, readSvgPreview } from './export-helpers'
 import {
   _electron as electron,
   expect,
@@ -25,7 +26,7 @@ let electronApp: ElectronApplication
 let page: Page
 let dataRoot: string
 let outputRoot: string
-let mockReleaseTag = 'v7.4.0'
+let mockReleaseTag = 'v7.5.0'
 const rendererErrors: string[] = []
 const qrRequests: string[] = []
 
@@ -290,7 +291,7 @@ test.beforeAll(async () => {
     }
   })
   await page.waitForSelector('.app-shell')
-  expect(await page.evaluate(async () => (await window.qrTool.bootstrap()).appVersion)).toBe('7.3.0')
+  expect(await page.evaluate(async () => (await window.qrTool.bootstrap()).appVersion)).toBe('7.4.0')
 })
 
 test.afterAll(async () => {
@@ -299,7 +300,7 @@ test.afterAll(async () => {
   await rm(dataRoot, { recursive: true, force: true })
 })
 
-test('renders the light three-workspace layout without fused surfaces', async () => {
+test('renders the light four-workspace layout without fused surfaces', async () => {
   expect(qrRequests).toEqual([])
   await expect(page).toHaveTitle('易码 EzQR-Tools')
   await expect(page.getByText('易码 EzQR-Tools')).toBeVisible()
@@ -312,7 +313,8 @@ test('renders the light three-workspace layout without fused surfaces', async ()
   await expect(page.getByRole('tab', { name: '图片重构' })).toBeVisible()
   await expect(page.getByRole('tab', { name: '文本生成' })).toBeVisible()
   await expect(page.getByRole('tab', { name: '二维码解析', exact: true })).toBeVisible()
-  await expect(page.locator('.workspace-nav-track').getByRole('tab')).toHaveCount(3)
+  await expect(page.getByRole('tab', { name: '透明与矢量', exact: true })).toBeVisible()
+  await expect(page.locator('.workspace-nav-track').getByRole('tab')).toHaveCount(4)
   await expect(page.getByRole('button', { name: /历史记录/ })).toBeVisible()
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(237, 244, 255)')
 
@@ -406,15 +408,15 @@ test('shows GitHub release updates and handles the latest-version state', async 
     .locator('.settings-nav')
     .getByRole('tab', { name: /数据与关于/ })
     .click()
-  await expect(settingsDialog.getByText('发现新版本 v7.4.0')).toBeVisible()
+  await expect(settingsDialog.getByText('发现新版本 v7.5.0')).toBeVisible()
   await expect(
     settingsDialog.getByRole('button', { name: '查看 GitHub Release' })
   ).toBeEnabled()
-  await expect(settingsDialog.getByText('最新版本 v7.4.0')).toBeVisible()
+  await expect(settingsDialog.getByText('最新版本 v7.5.0')).toBeVisible()
   await page.waitForTimeout(320)
   await page.screenshot({ path: 'test-results/qrtool-light-update.png' })
 
-  mockReleaseTag = 'v7.3.0'
+  mockReleaseTag = 'v7.4.0'
   await settingsDialog.getByRole('button', { name: '检查更新' }).click()
   await expect(settingsDialog.getByText('已是最新版本', { exact: true })).toBeVisible()
   await expect(settingsButton.locator('.update-indicator')).not.toBeVisible()
@@ -592,7 +594,7 @@ test('opens Chinese settings and announcement overlays', async () => {
   await page.getByRole('button', { name: '开发公告' }).click()
   await expect(page.getByRole('dialog', { name: '开发公告' })).toBeVisible()
   await page.waitForTimeout(300)
-  await expect(page.getByText('v7.3.0', { exact: false }).first()).toBeVisible()
+  await expect(page.getByText('v7.4.0', { exact: false }).first()).toBeVisible()
   const announcementDialog = page.getByRole('dialog', { name: '开发公告' })
   const announcementClose = await expectModalCloseHitbox(announcementDialog)
   await expect(
@@ -716,6 +718,85 @@ test('keeps clear spacing at large and minimum window sizes', async () => {
   await page.screenshot({ path: 'test-results/qrtool-light-settings-minimum.png' })
   await settingsDialog.getByRole('button', { name: '完成' }).click()
   expect(rendererErrors).toEqual([])
+})
+
+test('v7.4 integrated formats bind preview and save, and require the local engine', async () => {
+  await setMainNetworkBlocked(true)
+  await page.context().route(/^https?:\/\//, (route) => route.abort())
+  const content = '  易码导出 🧪\nhttps://example.com/vector\n  '
+  const select = page.getByRole('combobox', { name: '输出格式', exact: true })
+  try {
+    await page.evaluate(() => window.qrTool.updateSettings({
+      qr: { engine: 'caoliao', size: 333, errorCorrection: 'M', border: 4 }
+    }))
+    await page.getByRole('tab', { name: '文本生成' }).click()
+    await expect(select).toHaveValue('png')
+    await expect(select.locator('option[value="svg"]')).toHaveJSProperty('disabled', true)
+    await expect(select.locator('option[value="transparent-png"]')).toHaveJSProperty('disabled', true)
+    const blocked = await page.evaluate((text) => window.qrTool.generate({
+      operationId: 'blocked-format', content: text, format: 'svg',
+      qr: { engine: 'caoliao', size: 333, errorCorrection: 'M', border: 4 }
+    }).catch((error: Error) => error.message), content)
+    expect(blocked).toContain('先切换到本地')
+    await page.evaluate(() => window.qrTool.updateSettings({ qr: { engine: 'local' } }))
+    await page.locator('textarea.content-input').fill(content)
+    const generate = page.getByRole('button', { name: '生成二维码', exact: true })
+    const download = page.getByRole('button', { name: '下载二维码', exact: true })
+    const preview = page.getByAltText('生成的二维码')
+    await select.selectOption('transparent-png')
+    await generate.click()
+    await expect(page.locator('.dock-state')).toHaveText('透明 PNG')
+    await expect(preview.locator('..')).toHaveClass(/alpha-preview/)
+    await select.selectOption('svg')
+    const transparent = path.join(outputRoot, 'v74-generated.png')
+    await overrideSaveDialog(transparent)
+    await download.click()
+    await expect(page.locator('.preview-details code')).toHaveText(transparent)
+    const png = PNG.sync.read(await readFile(transparent))
+    expect([png.width, png.height]).toEqual([333, 333])
+    expectTransparentQr(png, content)
+    await generate.click()
+    await expect(page.locator('.dock-state')).toHaveText('SVG 矢量图')
+    const previewSvg = await readSvgPreview(preview, content)
+    const svg = path.join(outputRoot, 'v74-generated.svg')
+    await overrideSaveDialog(svg.slice(0, -4))
+    await download.click()
+    await expect(page.locator('.preview-details code')).toHaveText(svg)
+    expect(await readFile(svg, 'utf8')).toBe(previewSvg.text)
+    expect((await page.evaluate(() => window.qrTool.getHistory())).filter((item) => item.content === content)
+      .map((item) => item.savedPath)).toEqual([svg, transparent])
+
+    const source = path.join(dataRoot, 'v74-rebuild.png')
+    await writeFile(source, await readFile(path.join(decodeFixtures, 'base.png')))
+    await overrideOpenDialog(source)
+    await page.getByRole('tab', { name: '图片重构' }).click()
+    await expect(select).toHaveValue('png')
+    await select.selectOption('transparent-png')
+    const choose = page.getByRole('button', { name: '选择二维码图片', exact: true })
+    await choose.click()
+    const rebuiltPng = path.join(outputRoot, 'v74-rebuild_rebuild_transparent.png')
+    await expect(page.locator('.preview-details code')).toHaveText(rebuiltPng)
+    expectTransparentQr(PNG.sync.read(await readFile(rebuiltPng)), decodeContent)
+    await select.selectOption('svg')
+    await choose.click()
+    const rebuiltSvg = path.join(outputRoot, 'v74-rebuild_rebuild.svg')
+    await expect(page.locator('.preview-details code')).toHaveText(rebuiltSvg)
+    const rebuiltPreview = await readSvgPreview(page.getByAltText('二维码重构预览'), decodeContent)
+    expect(await readFile(rebuiltSvg, 'utf8')).toBe(rebuiltPreview.text)
+    await choose.click()
+    await expect(page.locator('.preview-details code')).toHaveText(path.join(outputRoot, 'v74-rebuild_rebuild_1.svg'))
+    expect(await mainNetworkAttempts()).toEqual([])
+  } finally {
+    await page.getByRole('tab', { name: '文本生成' }).click()
+    await select.selectOption('png')
+    await page.getByRole('tab', { name: '图片重构' }).click()
+    await select.selectOption('png')
+    await page.evaluate(() => window.qrTool.updateSettings({
+      qr: { engine: 'local', size: 1024, errorCorrection: 'M', border: 2 }
+    }))
+    await setMainNetworkBlocked(false)
+    await page.context().unroute(/^https?:\/\//)
+  }
 })
 
 test('generates Unicode and long content locally while every main-process fetch fails', async () => {
@@ -1359,4 +1440,127 @@ test('standalone decode recovers from a component error and isolates progress du
     })
   }
   expect(rendererErrors).toEqual([])
+})
+
+test('v7.4 converts white and transparent PNG to pixel-identical SVG offline', async () => {
+  const source = path.join(dataRoot, 'v74-original.png')
+  const content = '  独立转换 🌟\nhttps://example.com/transparent  '
+  const qr = PNG.sync.read(await QRCode.toBuffer(content, { width: 240, margin: 4 }))
+  const original = new PNG({ width: 258, height: 270 })
+  original.data.fill(255)
+  PNG.bitblt(qr, original, 0, 0, qr.width, qr.height, 7, 11)
+  const originalBytes = PNG.sync.write(original)
+  await writeFile(source, originalBytes)
+  const before = await page.evaluate(() => window.qrTool.getHistory())
+  await page.evaluate(() => window.qrTool.updateSettings({ qr: { engine: 'caoliao' } }))
+  await setMainNetworkBlocked(true)
+  await page.context().route(/^https?:\/\//, (route) => route.abort())
+  try {
+    await page.keyboard.press('Control+4')
+    await expect(page.getByRole('tab', { name: '透明与矢量' })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('.footer-engine')).toHaveText('本地转换 · 离线')
+    await overrideOpenDialog(source)
+    await page.getByRole('button', { name: '选择 PNG 图片' }).click()
+    await expect(page.getByAltText('待转换的原图')).toBeVisible()
+    const preview = page.getByAltText('转换结果预览')
+    const save = page.getByRole('button', { name: '另存转换结果' })
+    const toSvg = page.getByRole('button', { name: '透明 PNG 转 SVG' })
+    await page.getByRole('button', { name: '白底转透明 PNG' }).click()
+    await expect(page.locator('.dock-state')).toHaveText('透明 PNG')
+    const transparent = path.join(outputRoot, 'v74-converted.png')
+    await overrideSaveDialog(source)
+    await save.click()
+    await expect(page.locator('.conversion-task .status-pill.error')).toContainText('保留原始图片')
+    await overrideSaveDialog(transparent)
+    await save.click()
+    await expect(page.locator('.preview-details code')).toHaveText(transparent)
+    const png = PNG.sync.read(await readFile(transparent))
+    expectTransparentQr(png, content)
+    expect([png.width, png.height]).toEqual([original.width, original.height])
+    const mask = Array.from(original.data.filter((_byte, index) => index % 4 === 0), (value) => 255 - value)
+    expect(Array.from(png.data.filter((_byte, index) => index % 4 === 3))).toEqual(mask)
+
+    await toSvg.click()
+    await expect(page.locator('.dock-state')).toHaveText('SVG 矢量图')
+    const chained = await readSvgPreview(preview, content)
+    expect([chained.width, chained.height]).toEqual([original.width, original.height])
+    expect(chained.alpha).toEqual(mask)
+    const svg = path.join(outputRoot, 'v74-converted.svg')
+    await overrideSaveDialog(svg)
+    await save.click()
+    await expect(page.locator('.preview-details code')).toHaveText(svg)
+    expect(await readFile(svg, 'utf8')).toBe(chained.text)
+    await page.getByRole('button', { name: '白底直接转 SVG' }).click()
+    await expect(page.locator('.preview-details code')).toHaveText(source)
+    expect((await readSvgPreview(preview, content)).text).toBe(chained.text)
+
+    const session = await page.context().newCDPSession(page)
+    try {
+      const box = await page.locator('.conversion-task .image-drop-zone').boundingBox()
+      if (!box) throw new Error('Conversion drop zone unavailable')
+      const drag = { x: box.x + 40, y: box.y + 40, data: { items: [], files: [transparent], dragOperationsMask: 1 } }
+      await session.send('Input.dispatchDragEvent', { type: 'dragEnter', ...drag })
+      await session.send('Input.dispatchDragEvent', { type: 'dragOver', ...drag })
+      await session.send('Input.dispatchDragEvent', { type: 'drop', ...drag })
+    } finally {
+      await session.detach()
+    }
+    await expect(page.getByAltText('待转换的原图')).toBeVisible()
+    await toSvg.click()
+    await expect(preview).toBeVisible()
+    expect((await readSvgPreview(preview, content)).alpha).toEqual(mask)
+    await electronApp.evaluate(({ dialog }) => {
+      dialog.showSaveDialog = (async () => ({ canceled: true, filePath: '' })) as typeof dialog.showSaveDialog
+    })
+    const outputs = await outputSnapshot()
+    await save.click()
+    await expect(save).toBeEnabled()
+    expect(await outputSnapshot()).toEqual(outputs)
+    expect(await page.evaluate(() => window.qrTool.getHistory())).toEqual(before)
+    expect(await mainNetworkAttempts()).toEqual([])
+    expect(await readFile(source)).toEqual(originalBytes)
+  } finally {
+    await setMainNetworkBlocked(false)
+    await page.context().unroute(/^https?:\/\//)
+    await page.evaluate(() => window.qrTool.updateSettings({ qr: { engine: 'local' } }))
+  }
+})
+
+test('v7.4 rejects unsuitable images, retries, and fits the minimum window', async () => {
+  const source = path.join(dataRoot, 'v74-repaired.png')
+  const base = await readFile(path.join(decodeFixtures, 'base.png'))
+  const gray = PNG.sync.read(base)
+  gray.data[0] = 180
+  await writeFile(source, PNG.sync.write(gray))
+  await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(980, 700))
+  try {
+    const tab = page.getByRole('tab', { name: '透明与矢量' })
+    await tab.click()
+    expect(await tab.locator('strong').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+    const choose = page.getByRole('button', { name: '选择 PNG 图片' })
+    const toPng = page.getByRole('button', { name: '白底转透明 PNG' })
+    const error = page.locator('.conversion-task .status-pill.error')
+    await overrideOpenDialog(source)
+    await choose.click()
+    await toPng.click()
+    await expect(error).toContainText('纯黑白')
+    await writeFile(source, 'broken PNG')
+    await toPng.click()
+    await expect(error).toContainText('无效或已损坏')
+    await writeFile(source, base)
+    await toPng.click()
+    await expect(page.getByAltText('转换结果预览')).toBeVisible()
+    await expect(page.getByRole('button', { name: '另存转换结果' })).toBeInViewport()
+    await page.screenshot({ path: 'test-results/v7.4-conversion-minimum.png' })
+    for (const workspace of ['图片重构', '文本生成']) {
+      await page.getByRole('tab', { name: workspace }).click()
+      await expect(page.getByRole('combobox', { name: '输出格式', exact: true })).toBeInViewport()
+      if (workspace === '文本生成') {
+        await page.locator('textarea.content-input').fill('小窗格式选择')
+        await expect(page.getByRole('button', { name: '生成二维码', exact: true })).toBeInViewport()
+      }
+    }
+  } finally {
+    await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1320, 900))
+  }
 })

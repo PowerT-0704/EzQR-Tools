@@ -4,6 +4,7 @@ import path from 'node:path'
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
 import jsQR from 'jsqr'
 import { PNG } from 'pngjs'
+import { expectTransparentQr, readSvgPreview } from './export-helpers'
 
 const executablePath = process.env.QRTOOL_PACKAGED_EXECUTABLE
 
@@ -13,6 +14,8 @@ test('the packaged Windows app decodes, rebuilds, saves and generates offline', 
   const savedFile = path.join(dataRoot, 'packaged-offline.png')
   const sourceImage = path.join(dataRoot, 'packaged-source.webp')
   const rebuiltFile = path.join(dataRoot, 'packaged-source_rebuild.png')
+  const convertedPng = path.join(dataRoot, 'packaged-transparent.png')
+  const convertedSvg = path.join(dataRoot, 'packaged-vector.svg')
   let electronApp: ElectronApplication | undefined
   try {
     await mkdir(path.join(dataRoot, 'config'))
@@ -34,7 +37,7 @@ test('the packaged Windows app decodes, rebuilds, saves and generates offline', 
     await electronApp.evaluate(({ app, dialog }, paths) => {
       if (!app.isPackaged) throw new Error('当前启动的不是打包产物')
       if (process.versions.electron !== '44.9.1') throw new Error(`Electron 安全修复版本不正确：${process.versions.electron}`)
-      if (app.getVersion() !== '7.3.0') throw new Error(`打包版本不正确：${app.getVersion()}`)
+      if (app.getVersion() !== '7.4.0') throw new Error(`打包版本不正确：${app.getVersion()}`)
       const state = globalThis as typeof globalThis & { qrPackagedNetworkAttempts?: string[] }
       state.qrPackagedNetworkAttempts = []
       globalThis.fetch = (async (input) => {
@@ -92,6 +95,48 @@ test('the packaged Windows app decodes, rebuilds, saves and generates offline', 
     const history = await page.evaluate(() => window.qrTool.getHistory())
     expect(history.find((item) => item.content === content)?.savedPath).toBe(savedFile)
     expect(history.filter((item) => item.content === sourceContent && item.type === 'rebuild')).toHaveLength(2)
+
+    await page.getByRole('tab', { name: '透明与矢量' }).click()
+    await page.getByRole('button', { name: '选择 PNG 图片' }).click()
+    await page.getByRole('button', { name: '白底转透明 PNG' }).click()
+    await expect(page.locator('.dock-state')).toHaveText('透明 PNG')
+    await electronApp.evaluate(({ dialog }, target) => {
+      dialog.showSaveDialog = (async () => ({ canceled: false, filePath: target })) as typeof dialog.showSaveDialog
+    }, convertedPng)
+    const saveConverted = page.getByRole('button', { name: '另存转换结果' })
+    await saveConverted.click()
+    await expect(page.locator('.preview-details code')).toHaveText(convertedPng)
+    expectTransparentQr(PNG.sync.read(await readFile(convertedPng)), sourceContent)
+    await page.getByRole('button', { name: '透明 PNG 转 SVG' }).click()
+    await expect(page.locator('.dock-state')).toHaveText('SVG 矢量图')
+    // Check the full-size bitmap path without serializing megabytes of pixels from the renderer.
+    const vectorPreview = page.getByAltText('转换结果预览')
+    await expect.poll(() => vectorPreview.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBe(1024)
+    await electronApp.evaluate(({ dialog }, target) => {
+      dialog.showSaveDialog = (async () => ({ canceled: false, filePath: target })) as typeof dialog.showSaveDialog
+    }, convertedSvg)
+    await saveConverted.click()
+    await expect(page.locator('.preview-details code')).toHaveText(convertedSvg)
+    const vector = await readFile(convertedSvg, 'utf8')
+    expect(vector).toMatch(/viewBox="0 0 1024 1024"/)
+    await page.getByRole('button', { name: '白底直接转 SVG' }).click()
+    await expect(page.locator('.preview-details code')).toHaveText(rebuiltFile)
+    expect(await vectorPreview.evaluate(async (element) => (await fetch((element as HTMLImageElement).src)).text())).toBe(vector)
+    expect(await page.evaluate(() => window.qrTool.getHistory())).toEqual(history)
+
+    await page.evaluate(() => window.qrTool.updateSettings({ qr: { size: 333, border: 4 } }))
+    await page.getByRole('tab', { name: '文本生成' }).click()
+    await page.getByRole('combobox', { name: '输出格式', exact: true }).selectOption('svg')
+    await page.getByRole('button', { name: '生成二维码', exact: true }).click()
+    await expect(page.locator('.dock-state')).toHaveText('SVG 矢量图')
+    await readSvgPreview(page.getByAltText('生成的二维码'), content)
+
+    await page.getByRole('tab', { name: '图片重构' }).click()
+    await page.getByRole('combobox', { name: '输出格式', exact: true }).selectOption('transparent-png')
+    await page.getByRole('button', { name: '选择二维码图片', exact: true }).click()
+    const transparentRebuild = path.join(dataRoot, 'packaged-source_rebuild_rebuild_transparent.png')
+    await expect(page.locator('.preview-details code')).toHaveText(transparentRebuild)
+    expectTransparentQr(PNG.sync.read(await readFile(transparentRebuild)), sourceContent)
     const networkAttempts = await electronApp.evaluate(() => {
       const state = globalThis as typeof globalThis & { qrPackagedNetworkAttempts?: string[] }
       return state.qrPackagedNetworkAttempts ?? []

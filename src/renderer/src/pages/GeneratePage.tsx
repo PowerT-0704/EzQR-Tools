@@ -1,10 +1,13 @@
 import { Plasma } from '@cruxgarden/plasma-ui'
 import { UI_TEXT_LIMIT } from '../../../shared/constants'
-import type { QrSettings } from '../../../shared/types'
+import type { QrExportFormat, QrSettings } from '../../../shared/types'
+import { QrFormatSelect } from '../components/QrFormatSelect'
 import type { UiStatus } from '../types'
 
 interface GeneratePageProps {
   qrEngine: QrSettings['engine']
+  format: QrExportFormat
+  onFormatChange: (format: QrExportFormat) => void
   content: string
   busy: boolean
   status: UiStatus
@@ -18,6 +21,8 @@ interface GeneratePageProps {
 
 export function GeneratePage({
   qrEngine,
+  format,
+  onFormatChange,
   content,
   busy,
   status,
@@ -63,6 +68,7 @@ export function GeneratePage({
           }}
         />
 
+        <QrFormatSelect engine={qrEngine} format={format} disabled={busy} onChange={onFormatChange} />
         <div className="input-toolbar">
           <div className="toolbar-actions">
             <button
@@ -114,7 +120,7 @@ export function GeneratePage({
         <div>
           <span className="tip-number">03</span>
           <strong>容量与预览</strong>
-          <p>容量受文本和纠错级别影响；生成后可在右侧预览并下载 PNG。</p>
+          <p>容量受文本和纠错级别影响。生成后可在右侧预览并下载所选格式。</p>
         </div>
       </div>
     </div>

@@ -3,7 +3,7 @@ import type { QrSettings, WindowState } from '../../../shared/types'
 import { GlassButton } from './GlassControls'
 
 interface TitleBarProps {
-  decodeOnly: boolean
+  localTask: 'decode' | 'convert' | null
   maximized: boolean
   apiOk: boolean | null
   apiBusy: boolean
@@ -18,7 +18,7 @@ interface TitleBarProps {
 }
 
 export function TitleBar({
-  decodeOnly,
+  localTask,
   maximized,
   apiOk,
   apiBusy,
@@ -47,9 +47,9 @@ export function TitleBar({
           <span>轻盈液态玻璃二维码工作台</span>
         </div>
         <span
-          className={`header-status ${decodeOnly || qrEngine === 'local' || apiOk === true ? 'is-online' : apiOk === false ? 'is-offline' : apiBusy ? 'is-checking' : ''}`}
+          className={`header-status ${localTask || qrEngine === 'local' || apiOk === true ? 'is-online' : apiOk === false ? 'is-offline' : apiBusy ? 'is-checking' : ''}`}
           title={
-            decodeOnly ? '本地解析 · 离线，不生成新图片' : qrEngine === 'local'
+            localTask === 'convert' ? '本地转换 · 离线' : localTask === 'decode' ? '本地解析 · 离线，不生成新图片' : qrEngine === 'local'
               ? '本地解析与生成均可离线使用，无需 API Key'
               : apiOk === true
                 ? '草料在线处理：接口已连接'

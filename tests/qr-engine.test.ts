@@ -7,6 +7,7 @@ import type { ErrorCorrection, QrOptions } from '../src/shared/types'
 import { CaoliaoQrEngine } from '../src/main/services/caoliao-qr-engine'
 import { LocalQrEngine } from '../src/main/services/local-qr-engine'
 import { validateQrSettings } from '../src/main/services/qr-code-engine'
+import { renderBlackSvg } from '../src/main/services/qr-svg'
 
 const defaults: QrOptions = { size: 1024, errorCorrection: 'M', border: 2 }
 
@@ -190,6 +191,25 @@ describe('QR request validation', () => {
     null
   ])('rejects invalid snapshots rather than silently correcting them: %j', (options) => {
     expect(() => validateQrSettings(options)).toThrow()
+  })
+})
+
+describe('SVG export', () => {
+  it('accepts a dense vector at a nominal display size too small for a raster', async () => {
+    const engine = new LocalQrEngine()
+    const options: QrOptions = { size: 128, errorCorrection: 'M', border: 16 }
+    const content = 'a'.repeat(1200)
+    await expect(engine.encode(content, options)).rejects.toMatchObject({ code: 'QR_SIZE_TOO_SMALL' })
+    const svg = (await engine.encode(content, options, 'svg')).toString('utf8')
+    expect(svg).toContain('width="128" height="128"')
+    const viewBox = /viewBox="0 0 (\d+) (\d+)"/.exec(svg)
+    expect(Number(viewBox?.[1])).toBeGreaterThan(128)
+    expect(viewBox?.[1]).toBe(viewBox?.[2])
+  })
+
+  it('rejects an input whose merged geometry exceeds the export limit', () => {
+    expect(() => renderBlackSvg(448, 448, (x, y) => (x + y) % 2 === 0))
+      .toThrow(/黑块过多/)
   })
 })
 

@@ -1,7 +1,9 @@
-export type WorkspaceId = 'rebuild' | 'generate' | 'decode'
+export type WorkspaceId = 'rebuild' | 'generate' | 'decode' | 'convert'
 
 export type PaletteName = 'mistBlue' | 'sakuraPink' | 'mintGreen'
 export type ErrorCorrection = 'L' | 'M' | 'Q' | 'H'
+export type QrExportFormat = 'png' | 'transparent-png' | 'svg'
+export type ConversionMode = 'remove-white' | 'trace-transparent' | 'white-to-svg'
 export type QrEngineId = 'local' | 'caoliao'
 export type OutputMode = 'source' | 'custom'
 export type StatusKind = 'idle' | 'busy' | 'success' | 'error'
@@ -122,6 +124,7 @@ export interface GeneratedPreview {
 }
 
 export interface RebuildResult {
+  format: QrExportFormat
   contents: string[]
   content: string
   sourcePath: string
@@ -143,9 +146,32 @@ export interface DecodeRequest {
 }
 
 export interface GenerateResult {
+  format: QrExportFormat
   info: string
   previewUrl: string
   recordId: string
+}
+
+export interface ConversionRequest {
+  operationId: string
+  sourceId: string
+  mode: ConversionMode
+}
+
+export interface ConversionSource extends MediaSelection {
+  sourceId: string
+}
+
+export interface ConversionResult {
+  resultId: string
+  previewUrl: string
+  format: 'transparent-png' | 'svg'
+}
+
+export interface SaveQrRequest {
+  operationId: string
+  resultId: string
+  kind: 'generated' | 'converted'
 }
 
 export interface SaveQrResult {
@@ -163,7 +189,7 @@ export interface TextImportResult {
 
 export interface OperationProgress {
   operationId: string
-  kind: 'rebuild' | 'generate' | 'decode' | 'api' | 'save'
+  kind: 'rebuild' | 'generate' | 'decode' | 'convert' | 'api' | 'save'
   message: string
 }
 
@@ -187,6 +213,7 @@ export interface BootstrapData {
 }
 
 export interface RebuildRequest {
+  format?: QrExportFormat
   normalizedPng?: Uint8Array
   operationId: string
   path: string
@@ -194,6 +221,7 @@ export interface RebuildRequest {
 }
 
 export interface GenerateRequest {
+  format?: QrExportFormat
   operationId: string
   content: string
   qr?: QrSettings
@@ -211,7 +239,10 @@ export interface QrToolApi {
   rebuild(request: RebuildRequest): Promise<RebuildResult>
   decode(request: DecodeRequest): Promise<DecodeResult>
   generate(request: GenerateRequest): Promise<GenerateResult>
-  saveQr(operationId: string): Promise<SaveQrResult | null>
+  chooseConversionImage(): Promise<ConversionSource | null>
+  prepareConversionImage(path: string): Promise<ConversionSource>
+  convertImage(request: ConversionRequest): Promise<ConversionResult>
+  saveQr(request: SaveQrRequest): Promise<SaveQrResult | null>
   chooseTextFile(): Promise<TextImportResult | null>
   getHistory(): Promise<HistoryRecord[]>
   clearHistory(): Promise<HistoryRecord[]>

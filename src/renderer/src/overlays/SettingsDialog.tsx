@@ -400,7 +400,7 @@ export function SettingsDialog({
                 <div>
                   <span className="section-kicker">连接与文件</span>
                   <h3>处理引擎、参数与保存</h3>
-                  <p>文本生成和图片重构共用下方引擎与参数；独立“二维码解析”始终本地处理。</p>
+                  <p>文本生成和图片重构共用下方引擎与参数。独立解析和图层转换始终在本机运行。</p>
                 </div>
               </header>
 
@@ -411,7 +411,7 @@ export function SettingsDialog({
                     <p>
                       {settings.qr.engine === 'local'
                         ? '图片解析和二维码生成均在本机完成，无需 API Key。'
-                        : '重构图片和生成内容将上传草料接口；独立解析始终离线。'}
+                        : '重构图片和生成内容将上传草料接口，输出为白底 PNG。'}
                     </p>
                   </div>
                   <Segmented
@@ -432,7 +432,7 @@ export function SettingsDialog({
               <div className="qr-parameter-controls">
                 <SliderField
                   label="二维码尺寸"
-                  description="输出 PNG 的宽高像素。内容较多时需要更大尺寸。"
+                  description="PNG 的像素宽高和 SVG 的默认显示尺寸。内容较多时，PNG 可能需要更大尺寸。"
                   value={settings.qr.size}
                   min={128}
                   max={4096}

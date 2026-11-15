@@ -9,6 +9,7 @@ import type {
   HistoryRecord,
   MediaSelection,
   OperationProgress,
+  QrExportFormat,
   RebuildResult,
   SettingsPatch,
   UpdateInfo,
@@ -23,12 +24,14 @@ import { TitleBar } from './components/TitleBar'
 import { WorkspaceNav } from './components/WorkspaceNav'
 import { paletteStyle } from './lib/appearance'
 import { createOperationId, errorMessage, normalizeQrImage } from './lib/image'
+import { useImageConversion } from './lib/use-image-conversion'
 import { AnnouncementDialog } from './overlays/AnnouncementDialog'
 import { AlertDialog, type AlertState } from './overlays/AlertDialog'
 import { SettingsDialog } from './overlays/SettingsDialog'
 import { GeneratePage } from './pages/GeneratePage'
 import { RebuildPage } from './pages/RebuildPage'
 import { DecodePage } from './pages/DecodePage'
+import { ConversionPage, ConversionPreview } from './pages/ConversionPage'
 import type { UiStatus } from './types'
 
 type DialogName = 'settings' | 'announcement' | 'history' | null
@@ -123,6 +126,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
     message: '等待选择图片…'
   })
   const [rebuildResult, setRebuildResult] = useState<RebuildResult | null>(null)
+  const [rebuildFormat, setRebuildFormat] = useState<QrExportFormat>('png')
 
   const [decodeBusy, setDecodeBusy] = useState(false)
   const decodeInFlight = useRef(false)
@@ -130,9 +134,14 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
   const [decodeSelection, setDecodeSelection] = useState<MediaSelection | null>(null)
   const [decodeResult, setDecodeResult] = useState<DecodeResult | null>(null)
   const [decodeStatus, setDecodeStatus] = useState<UiStatus>({ kind: 'idle', message: '等待选择图片…' })
+  const conversion = useImageConversion()
+  const selectConversionImage = conversion.select
 
   const [content, setContent] = useState('')
   const [generateBusy, setGenerateBusy] = useState(false)
+  const [generateSaveBusy, setGenerateSaveBusy] = useState(false)
+  const generateInFlight = useRef(false)
+  const [generateFormat, setGenerateFormat] = useState<QrExportFormat>('png')
   const [generateStatus, setGenerateStatus] = useState<UiStatus>({
     kind: 'idle',
     message: '等待输入内容…'
@@ -142,7 +151,8 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
   const [fileWarning, setFileWarning] = useState(false)
   const [lastSavedPath, setLastSavedPath] = useState('')
 
-  const activeOperation = useRef('')
+  const rebuildOperation = useRef('')
+  const generateOperation = useRef('')
   const pendingPatch = useRef<SettingsPatch>({})
   const queuedPatches = useRef<SettingsPatch[]>([])
   const settingsWriteQueue = useRef<Promise<void>>(Promise.resolve())
@@ -228,6 +238,9 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
       } else if (event.key === '3') {
         event.preventDefault()
         setWorkspace('decode')
+      } else if (event.key === '4') {
+        event.preventDefault()
+        setWorkspace('convert')
       } else if (event.key.toLowerCase() === 'h') {
         if (!alert && (!dialog || dialog === 'history')) {
           event.preventDefault()
@@ -342,10 +355,11 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
       if (rebuildInFlight.current) return
       rebuildInFlight.current = true
       const qr = { ...settings.qr }
+      const format = qr.engine === 'local' ? rebuildFormat : 'png'
       setWorkspace('rebuild')
       setRebuildSelection(selection)
       const operationId = createOperationId('rebuild')
-      activeOperation.current = operationId
+      rebuildOperation.current = operationId
       setRebuildBusy(true)
       setRebuildResult(null)
       setRebuildStatus({ kind: 'busy', message: '正在读取并转换图片…' })
@@ -355,6 +369,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
           operationId,
           path: selection.path,
           qr,
+          format,
           normalizedPng: qr.engine === 'local' ? normalizedPng : undefined
         })
         setRebuildResult(result)
@@ -369,10 +384,10 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
       } finally {
         rebuildInFlight.current = false
         setRebuildBusy(false)
-        activeOperation.current = ''
+        rebuildOperation.current = ''
       }
     },
-    [settings.qr, showToast]
+    [settings.qr, rebuildFormat, showToast]
   )
 
   const chooseImage = useCallback(async (): Promise<void> => {
@@ -386,18 +401,21 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
   }, [beginRebuild])
 
   const beginGenerate = useCallback(async (): Promise<void> => {
+    if (generateInFlight.current) return
     if (!content.trim()) {
       setGenerateStatus({ kind: 'error', message: '请先输入要生成二维码的内容' })
       return
     }
     const operationId = createOperationId('generate')
-    activeOperation.current = operationId
+    generateInFlight.current = true
+    generateOperation.current = operationId
     setGenerateBusy(true)
     setGenerateStatus({ kind: 'busy', message: '正在生成二维码…' })
     try {
       const result = await window.qrTool.generate({
         operationId,
         content,
+        format: settings.qr.engine === 'local' ? generateFormat : 'png',
         qr: { ...settings.qr }
       })
       setGenerateResult(result)
@@ -407,21 +425,32 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
       setGenerateStatus({ kind: 'error', message: errorMessage(error) })
     } finally {
       setGenerateBusy(false)
-      activeOperation.current = ''
+      generateInFlight.current = false
+      generateOperation.current = ''
     }
-  }, [content, settings.qr])
+  }, [content, generateFormat, settings.qr])
 
   const saveGenerated = useCallback(async (): Promise<void> => {
+    if (!generateResult || generateInFlight.current) return
+    generateInFlight.current = true
+    setGenerateSaveBusy(true)
     try {
-      const result = await window.qrTool.saveQr(createOperationId('save'))
+      const result = await window.qrTool.saveQr({
+        operationId: createOperationId('save'),
+        kind: 'generated',
+        resultId: generateResult.recordId
+      })
       if (!result) return
       setLastSavedPath(result.savedPath)
       setGenerateStatus({ kind: 'success', message: `已保存：${result.savedPath}` })
       showToast('二维码已保存')
     } catch (error) {
       setGenerateStatus({ kind: 'error', message: errorMessage(error) })
+    } finally {
+      generateInFlight.current = false
+      setGenerateSaveBusy(false)
     }
-  }, [showToast])
+  }, [generateResult, showToast])
 
   const importText = useCallback(async (): Promise<void> => {
     try {
@@ -452,10 +481,9 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
       }
       return
     }
-    if (!activeOperation.current || event.operationId !== activeOperation.current) return
-    if (event.kind === 'rebuild') {
+    if (event.kind === 'rebuild' && event.operationId === rebuildOperation.current) {
       setRebuildStatus({ kind: 'busy', message: event.message })
-    } else if (event.kind === 'generate') {
+    } else if (event.kind === 'generate' && event.operationId === generateOperation.current) {
       setGenerateStatus({ kind: 'busy', message: event.message })
     }
   }, [])
@@ -475,10 +503,14 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
       event.preventDefault()
       dragDepth.current = 0
       setDragging(false)
-      const decodeOnly = workspace === 'decode'
-      if (decodeOnly ? decodeInFlight.current : rebuildInFlight.current) return
       const file = event.dataTransfer.files[0]
       if (!file) return
+      if (workspace === 'convert') {
+        await selectConversionImage(window.qrTool.pathForFile(file))
+        return
+      }
+      const decodeOnly = workspace === 'decode'
+      if (decodeOnly ? decodeInFlight.current : rebuildInFlight.current) return
       try {
         const filePath = window.qrTool.pathForFile(file)
         if (!filePath) throw new Error('无法获取拖入文件的本地路径')
@@ -496,7 +528,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
         }
       }
     },
-    [beginRebuild, beginDecode, workspace]
+    [beginRebuild, beginDecode, selectConversionImage, workspace]
   )
 
   const reuseHistory = useCallback(
@@ -577,7 +609,7 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
         onDrop={(event) => void onDrop(event)}
       >
         <TitleBar
-          decodeOnly={workspace === 'decode'}
+          localTask={workspace === 'decode' || workspace === 'convert' ? workspace : null}
           maximized={windowState.maximized}
           apiOk={apiStatus.ok}
           apiBusy={apiBusy}
@@ -609,6 +641,8 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
             {workspace === 'rebuild' ? (
               <RebuildPage
                 qrEngine={settings.qr.engine}
+                format={rebuildFormat}
+                onFormatChange={setRebuildFormat}
                 busy={rebuildBusy}
                 status={rebuildStatus}
                 result={rebuildResult}
@@ -628,11 +662,15 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
                   ? () => void beginDecode(decodeSelection) : undefined}
                 onCopy={(text) => void copyText(text)}
               />
+            ) : workspace === 'convert' ? (
+              <ConversionPage {...conversion} />
             ) : (
               <GeneratePage
                 qrEngine={settings.qr.engine}
+                format={generateFormat}
+                onFormatChange={setGenerateFormat}
                 content={content}
-                busy={generateBusy}
+                busy={generateBusy || generateSaveBusy}
                 status={generateStatus}
                 fileMessage={fileMessage}
                 fileWarning={fileWarning}
@@ -645,21 +683,22 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
           </section>
 
           <div className="preview-area">
-            <PreviewDock
+            {workspace === 'convert' ? <ConversionPreview {...conversion} /> : <PreviewDock
               decodeSelection={decodeSelection}
               workspace={workspace}
               rebuildResult={rebuildResult}
               generateResult={generateResult}
               lastSavedPath={lastSavedPath}
+              saveDisabled={generateBusy || generateSaveBusy}
               onOpenImage={(path) => void window.qrTool.openPath(path)}
               onOpenFolder={(kind) => void window.qrTool.openOutputDirectory(kind)}
               onSave={() => void saveGenerated()}
-            />
+            />}
           </div>
         </main>
 
         <Footer
-          decodeOnly={workspace === 'decode'}
+          localTask={workspace === 'decode' || workspace === 'convert' ? workspace : null}
           appVersion={boot.appVersion}
           authorEmail={boot.authorEmail}
           apiStatus={apiStatus}
@@ -672,8 +711,8 @@ function Workspace({ boot }: { boot: BootstrapData }): React.JSX.Element {
         {dragging && (
           <div className="drop-overlay" aria-hidden="true">
             <div>
-              <strong>释放以解析二维码</strong>
-              <span>{workspace === 'decode' ? '仅在本机解析，不生成新图片' : '图片会自动进入重构工作区'}</span>
+              <strong>{workspace === 'convert' ? '释放以导入 PNG' : '释放以解析二维码'}</strong>
+              <span>{workspace === 'convert' ? '导入后选择转换方式' : workspace === 'decode' ? '仅在本机解析，不生成新图片' : '图片会自动进入重构工作区'}</span>
             </div>
           </div>
         )}

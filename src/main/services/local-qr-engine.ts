@@ -1,10 +1,11 @@
 import QRCode from 'qrcode'
-import type { QrOptions } from '../../shared/types'
+import type { QrExportFormat, QrOptions } from '../../shared/types'
 import { DEFAULT_ERROR_CORRECTION, DEFAULT_QR_BORDER, DEFAULT_QR_SIZE } from '../../shared/constants'
 import { AppError } from './errors'
 import { LocalDecodeEngine } from './local-decode-engine'
 import type { EngineHealth, ImageBytes, QrCodeEngine } from './qr-code-engine'
 import { validateQrOptions } from './qr-code-engine'
+import { renderBlackSvg } from './qr-svg'
 
 function capacityError(): AppError {
   return new AppError(
@@ -17,7 +18,7 @@ export class LocalQrEngine implements QrCodeEngine {
   readonly id = 'local' as const
   readonly supportsDecode = true
 
-  async encode(content: string, options: QrOptions): Promise<Buffer> {
+  async encode(content: string, options: QrOptions, format: QrExportFormat = 'png'): Promise<Buffer> {
     if (typeof content !== 'string' || !content.trim()) {
       throw new AppError('EMPTY_CONTENT', '二维码内容不能为空')
     }
@@ -27,6 +28,15 @@ export class LocalQrEngine implements QrCodeEngine {
     try {
       const matrix = QRCode.create(content, { errorCorrectionLevel: qr.errorCorrection })
       const minimumSize = matrix.modules.size + qr.border * 2
+      if (format === 'svg') {
+        const isBlack = (x: number, y: number): boolean => {
+          const column = x - qr.border
+          const row = y - qr.border
+          return column >= 0 && row >= 0 && column < matrix.modules.size && row < matrix.modules.size &&
+            Boolean(matrix.modules.get(row, column))
+        }
+        return renderBlackSvg(minimumSize, minimumSize, isBlack, qr.size, qr.size)
+      }
       if (qr.size < minimumSize) {
         throw new AppError(
           'QR_SIZE_TOO_SMALL',
@@ -42,7 +52,7 @@ export class LocalQrEngine implements QrCodeEngine {
         width,
         margin: qr.border,
         errorCorrectionLevel: qr.errorCorrection,
-        color: { dark: '#000000ff', light: '#ffffffff' }
+        color: { dark: '#000000ff', light: format === 'transparent-png' ? '#ffffff00' : '#ffffffff' }
       })
     } catch (error) {
       if (error instanceof AppError) throw error
