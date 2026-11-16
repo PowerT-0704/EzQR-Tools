@@ -14,6 +14,7 @@
 ![Plasma UI](https://img.shields.io/badge/UI-Plasma%20Liquid%20Glass-7c66d9?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-2b9b73?style=flat-square)
 [![Release](https://img.shields.io/github/v/release/PowerT-0704/EzQR-Tools?style=flat-square)](https://github.com/PowerT-0704/EzQR-Tools/releases/latest)
+[![发布附件累计下载次数](https://img.shields.io/github/downloads/PowerT-0704/EzQR-Tools/total?style=flat-square&color=526edb)](https://github.com/PowerT-0704/EzQR-Tools/releases)
 [![GitHub](https://img.shields.io/badge/GitHub-PowerT--0704-24292f?style=flat-square&logo=github)](https://github.com/PowerT-0704/EzQR-Tools)
 
 <sub>CDUT 学生项目 · 非官方工具 · Windows x64 · <a href="https://w3f7-ezqr-tool.netlify.app/">项目官网</a></sub>
